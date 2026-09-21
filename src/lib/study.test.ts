@@ -31,7 +31,7 @@ describe('study rules', () => {
     expect(isValidPlacement({ page: 1, x: 100, y: 100, ...box }, placed)).toBe(true)
   })
 
-  it('prioritizes unseen words when random mode excludes recent repeats', () => {
+  it('prioritizes unseen words after due and weak words in random mode', () => {
     vi.spyOn(Math, 'random').mockReturnValue(.5)
     const words = ['new-a', 'new-b', 'old', 'recent'].map(word)
     const card = createEmptyCard(new Date(Date.now() + 86400000))
@@ -40,6 +40,13 @@ describe('study rules', () => {
       ['recent', { wordId: 'recent', card, lastStudiedAt: new Date().toISOString() }],
     ])
     expect(pickWords(words, cards, 2, 'random', false).map((item) => item.id).sort()).toEqual(['new-a', 'new-b'])
+  })
+
+  it('always schedules due words before new words', () => {
+    const words = ['new-a', 'due', 'new-b'].map(word)
+    const dueCard = createEmptyCard(new Date(Date.now() - 86400000))
+    const cards = new Map<string, StoredCard>([['due', { wordId: 'due', card: dueCard, lastStudiedAt: new Date(Date.now() - 5 * 86400000).toISOString() }]])
+    expect(pickWords(words, cards, 1, 'random', false).map((item) => item.id)).toEqual(['due'])
   })
 
   it('advances an FSRS card and produces a future due date', () => {

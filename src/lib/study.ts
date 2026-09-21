@@ -129,23 +129,33 @@ export function pickWords(words: WordEntry[], cards: Map<string, StoredCard>, co
     return card && new Date(card.card.due).getTime() <= now
   })
   const unseen = words.filter((word) => !cards.has(word.id))
-  const old = words.filter((word) => {
+  const weak = words.filter((word) => {
     const card = cards.get(word.id)
-    return card && new Date(card.card.due).getTime() > now && (!card.lastStudiedAt || new Date(card.lastStudiedAt).getTime() < recentCutoff)
+    return card && new Date(card.card.due).getTime() > now && (card.card.difficulty ?? 0) >= 7
   })
-  const recent = words.filter((word) => {
+  const learned = words.filter((word) => {
     const card = cards.get(word.id)
-    return card && new Date(card.card.due).getTime() > now && card.lastStudiedAt && new Date(card.lastStudiedAt).getTime() >= recentCutoff
+    return card && new Date(card.card.due).getTime() > now && (card.card.difficulty ?? 0) < 7
+  })
+  const old = learned.filter((word) => {
+    const card = cards.get(word.id)
+    return !card?.lastStudiedAt || new Date(card.lastStudiedAt).getTime() < recentCutoff
+  })
+  const recent = learned.filter((word) => {
+    const card = cards.get(word.id)
+    return Boolean(card?.lastStudiedAt && new Date(card.lastStudiedAt).getTime() >= recentCutoff)
   })
   let ordered: WordEntry[]
   if (mode === 'due') {
-    const weak = old.sort((a, b) => (cards.get(b.id)?.card.difficulty ?? 0) - (cards.get(a.id)?.card.difficulty ?? 0))
-    ordered = [...shuffle(due), ...weak, ...shuffle(unseen), ...shuffle(recent)]
+    const weakFirst = weak.sort((a, b) => (cards.get(b.id)?.card.difficulty ?? 0) - (cards.get(a.id)?.card.difficulty ?? 0))
+    ordered = [...shuffle(due), ...weakFirst, ...shuffle(old), ...shuffle(unseen), ...shuffle(recent)]
   } else if (mode === 'weak') {
-    const learned = [...old, ...recent].sort((a, b) => (cards.get(b.id)?.card.difficulty ?? 0) - (cards.get(a.id)?.card.difficulty ?? 0))
-    ordered = [...shuffle(due), ...learned, ...shuffle(unseen)]
+    const weakFirst = weak.sort((a, b) => (cards.get(b.id)?.card.difficulty ?? 0) - (cards.get(a.id)?.card.difficulty ?? 0))
+    ordered = [...shuffle(due), ...weakFirst, ...shuffle(old), ...shuffle(unseen), ...shuffle(recent)]
   } else {
-    ordered = [...shuffle(unseen), ...shuffle(old), ...(allowRecent ? shuffle(recent) : recent.sort((a, b) => new Date(cards.get(a.id)!.lastStudiedAt!).getTime() - new Date(cards.get(b.id)!.lastStudiedAt!).getTime())), ...shuffle(due)]
+    const weakFirst = weak.sort((a, b) => (cards.get(b.id)?.card.difficulty ?? 0) - (cards.get(a.id)?.card.difficulty ?? 0))
+    const recentWords = allowRecent ? shuffle(recent) : recent.sort((a, b) => new Date(cards.get(a.id)!.lastStudiedAt!).getTime() - new Date(cards.get(b.id)!.lastStudiedAt!).getTime())
+    ordered = [...shuffle(due), ...weakFirst, ...shuffle(unseen), ...shuffle(old), ...recentWords]
   }
   return [...new Map(ordered.map((word) => [word.id, word])).values()].slice(0, count)
 }

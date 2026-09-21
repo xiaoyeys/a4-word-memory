@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, LocateFixed, Minus, Plus, Volume2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, LocateFixed, Maximize2, Minimize2, Minus, Plus, Volume2 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import type { PlacedWord } from '../types'
 import { isValidPlacement, PAGE_HEIGHT, PAGE_WIDTH } from '../lib/study'
@@ -17,6 +17,8 @@ interface PaperCanvasProps {
   onSpeak: (word: string) => void
   canHint?: boolean
   onHint?: () => void
+  mobileExpanded: boolean
+  onMobileToggle: () => void
 }
 
 export function PaperCanvas(props: PaperCanvasProps) {
@@ -36,7 +38,7 @@ export function PaperCanvas(props: PaperCanvasProps) {
   }
 
   return (
-    <section className="paper-workspace" aria-label="A4单词纸">
+    <section className={`paper-workspace${props.mobileExpanded ? ' mobile-paper-expanded' : ''}`} aria-label="A4单词纸">
       <div className="paper-toolbar">
         <div className="pager">
           <button className="icon-button" disabled={props.currentPage === 0} onClick={() => props.onPageChange(props.currentPage - 1)} aria-label="上一页"><ChevronLeft /></button>
@@ -45,12 +47,13 @@ export function PaperCanvas(props: PaperCanvasProps) {
         </div>
         <div className="paper-actions">
           {props.canHint && <button className="tool-button" onClick={props.onHint}><LocateFixed size={17} />提示位置</button>}
+          <button className="tool-button mobile-paper-toggle" onClick={props.onMobileToggle} aria-label={props.mobileExpanded ? '返回单词卡片' : '放大A4纸'}>{props.mobileExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}<span>{props.mobileExpanded ? '返回卡片' : '放大纸张'}</span></button>
           <button className="icon-button" onClick={() => setZoom(Math.max(.72, zoom - .12))} aria-label="缩小纸张"><Minus /></button>
           <span className="zoom-label">{Math.round(zoom * 100)}%</span>
           <button className="icon-button" onClick={() => setZoom(Math.min(1.7, zoom + .12))} aria-label="放大纸张"><Plus /></button>
         </div>
       </div>
-      <div className="paper-scroll">
+      <div className="paper-scroll" onClick={() => { if (!props.mobileExpanded && !props.placing) props.onMobileToggle() }}>
         <div className="paper-zoom" style={{ width: `${zoom * 100}%` }}>
           <div ref={ref} className={props.placing ? 'a4-paper placing' : 'a4-paper'} onClick={selectPoint}>
             {pageWords.map((item) => {

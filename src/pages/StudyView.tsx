@@ -53,15 +53,23 @@ function initialPanelPosition(): PanelPosition {
   return dockedPanelPosition('right')
 }
 
-function speak(text: string, accent: AppSettings['accent']) {
-  if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
+function speak(text: string, accent: AppSettings['accent'], onFailure?: () => void) {
+  if (!('speechSynthesis' in window)) {
+    onFailure?.()
+    return false
+  }
+  const synthesis = window.speechSynthesis
+  synthesis.cancel()
+  synthesis.resume()
   const utterance = new SpeechSynthesisUtterance(text)
-  const voices = window.speechSynthesis.getVoices()
+  const voices = synthesis.getVoices()
   utterance.voice = voices.find((voice) => voice.lang === accent) ?? voices.find((voice) => voice.lang.startsWith('en')) ?? null
   utterance.lang = accent
   utterance.rate = .82
-  window.speechSynthesis.speak(utterance)
+  utterance.volume = 1
+  utterance.onerror = () => onFailure?.()
+  synthesis.speak(utterance)
+  return true
 }
 
 export function StudyView({ initial, words, settings, onSettings, onFinish, onExit }: StudyViewProps) {
@@ -71,12 +79,27 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   const [currentPage, setCurrentPage] = useState(initial.preview?.page ?? Math.max(0, ...initial.placed.map((item) => item.page)))
   const [highlightedId, setHighlightedId] = useState<string>()
   const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
+  const [mobileSurface, setMobileSurface] = useState<'card' | 'paper'>(initial.stage === 'recall' ? 'paper' : 'card')
   const dragOffset = useRef<{ x: number; y: number } | undefined>(undefined)
   const wordsById = useMemo(() => new Map(words.map((word) => [word.id, word])), [words])
   const currentWord = wordsById.get(session.wordIds[session.currentWordIndex])
   const recallPlacement = session.placed[session.recallIndex]
   const recallWord = recallPlacement ? wordsById.get(recallPlacement.wordId) : undefined
   const relearnWord = session.selectedRecallWordId ? wordsById.get(session.selectedRecallWordId) : undefined
+
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return
+    const synthesis = window.speechSynthesis
+    synthesis.getVoices()
+    const refreshVoices = () => synthesis.getVoices()
+    synthesis.addEventListener('voiceschanged', refreshVoices)
+    return () => synthesis.removeEventListener('voiceschanged', refreshVoices)
+  }, [])
+
+  useEffect(() => {
+    if (session.stage === 'recall') setMobileSurface('paper')
+    else if (session.stage === 'learn' || session.stage === 'relearn' || session.stage === 'spell') setMobileSurface('card')
+  }, [session.stage])
 
   useEffect(() => {
     const value = { ...session, updatedAt: new Date().toISOString() }
@@ -129,6 +152,10 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
 
   function dockPanel(dock: Exclude<PanelDock, 'free'>) {
     setPanelPosition(dockedPanelPosition(dock))
+  }
+
+  function playWord(word: string) {
+    speak(word, settings.accent, () => setMessage('当前浏览器不支持网页朗读，请换用手机系统浏览器打开'))
   }
 
   async function update(next: StudySession) {
@@ -221,7 +248,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
 
   async function selectPaperWord(item: PlacedWord) {
     if (session.stage !== 'recall') {
-      speak(wordsById.get(item.wordId)?.word ?? '', settings.accent)
+      playWord(wordsById.get(item.wordId)?.word ?? '')
       return
     }
     if (item.wordId !== recallPlacement?.wordId) {
@@ -229,6 +256,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
       return
     }
     setMessage('先在心里回忆释义，再显示答案')
+    if (window.innerWidth <= 700) setMobileSurface('card')
     await update({ ...session, selectedRecallWordId: item.wordId, revealedMeaning: false })
   }
 
@@ -283,7 +311,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   }
 
   return (
-    <div className="study-layout">
+    <div className={`study-layout mobile-surface-${mobileSurface}`}>
       <header className="study-header">
         <button className="tool-button" onClick={onExit}><ArrowLeft size={17} />暂时离开</button>
         <div className="study-progress">
@@ -293,6 +321,11 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
         </div>
         <button className={settings.showSequence ? 'tool-button active' : 'tool-button'} onClick={toggleSequence}>{settings.showSequence ? <EyeOff size={17} /> : <Eye size={17} />}{settings.showSequence ? '隐藏序号' : '显示序号'}</button>
       </header>
+
+      <div className="mobile-surface-switcher" aria-label="学习内容切换">
+        <button className={mobileSurface === 'card' ? 'active' : ''} onClick={() => setMobileSurface('card')}>单词卡片</button>
+        <button className={mobileSurface === 'paper' ? 'active' : ''} onClick={() => setMobileSurface('paper')}>A4纸</button>
+      </div>
 
       <PaperCanvas
         placed={session.placed}
@@ -305,9 +338,11 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
         placing={placingBox}
         showSequence={settings.showSequence}
         highlightedId={highlightedId}
-        onSpeak={(word) => speak(word, settings.accent)}
+        onSpeak={playWord}
         canHint={session.stage === 'recall' && !session.selectedRecallWordId}
         onHint={hintPosition}
+        mobileExpanded={mobileSurface === 'paper'}
+        onMobileToggle={() => setMobileSurface((current) => current === 'paper' ? 'card' : 'paper')}
       />
 
       <aside className="study-panel floating-panel" style={{ left: panelPosition.x, top: panelPosition.y }}>
@@ -331,7 +366,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
         {(session.stage === 'learn' || session.stage === 'relearn') && (session.stage === 'relearn' ? relearnWord : currentWord) && (() => {
           const word = session.stage === 'relearn' ? relearnWord! : currentWord!
           return <div className="word-study">
-            <button className="word-title" onClick={() => speak(word.word, settings.accent)}>{word.word}<Volume2 size={19} /></button>
+            <button className="word-title" onClick={() => playWord(word.word)}>{word.word}<Volume2 size={19} /></button>
             <p className="phonetic">{word.phonetic || '暂无音标'} · {word.partOfSpeech || '词性未标注'}</p>
             <p className="meaning">{word.meaning}</p>
             <div className="repetition-dots" aria-label={`已完成${session.repetitions}遍`}>
@@ -381,7 +416,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
           </>}
         </div>}
 
-        {message && <div className={message.includes('不正确') || message.includes('顺序不对') ? 'inline-message error' : 'inline-message'}><span>{message}</span><button onClick={() => setMessage('')} aria-label="关闭提示"><X size={15} /></button></div>}
+        {message && <div className={message.includes('不正确') || message.includes('顺序不对') || message.includes('朗读') ? 'inline-message error' : 'inline-message'}><span>{message}</span><button onClick={() => setMessage('')} aria-label="关闭提示"><X size={15} /></button></div>}
       </aside>
     </div>
   )
