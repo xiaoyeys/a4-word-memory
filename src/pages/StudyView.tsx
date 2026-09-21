@@ -72,6 +72,12 @@ function speak(text: string, accent: AppSettings['accent'], onFailure?: () => vo
   return true
 }
 
+function onlineAudioUrl(text: string, accent: AppSettings['accent']) {
+  // Youdao uses type=2 for American English and type=1 for British English.
+  const type = accent === 'en-US' ? '2' : '1'
+  return `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&type=${type}`
+}
+
 export function StudyView({ initial, words, settings, onSettings, onFinish, onExit }: StudyViewProps) {
   const [session, setSession] = useState(initial)
   const [spelling, setSpelling] = useState('')
@@ -80,6 +86,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   const [highlightedId, setHighlightedId] = useState<string>()
   const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
   const [mobileSurface, setMobileSurface] = useState<'card' | 'paper'>(initial.stage === 'recall' ? 'paper' : 'card')
+  const audioRef = useRef<HTMLAudioElement | undefined>(undefined)
   const dragOffset = useRef<{ x: number; y: number } | undefined>(undefined)
   const wordsById = useMemo(() => new Map(words.map((word) => [word.id, word])), [words])
   const currentWord = wordsById.get(session.wordIds[session.currentWordIndex])
@@ -155,7 +162,23 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   }
 
   function playWord(word: string) {
-    speak(word, settings.accent, () => setMessage('当前浏览器不支持网页朗读，请换用手机系统浏览器打开'))
+    audioRef.current?.pause()
+    const audio = new Audio(onlineAudioUrl(word, settings.accent))
+    audio.preload = 'none'
+    audio.volume = 1
+    audioRef.current = audio
+    let fallbackStarted = false
+    const fallback = () => {
+      if (fallbackStarted) return
+      fallbackStarted = true
+      if (audioRef.current === audio) audioRef.current = undefined
+      speak(word, settings.accent, () => setMessage('在线发音和浏览器朗读都不可用，请检查网络或系统语音设置'))
+    }
+    audio.onended = () => {
+      if (audioRef.current === audio) audioRef.current = undefined
+    }
+    audio.onerror = fallback
+    audio.play().catch(fallback)
   }
 
   async function update(next: StudySession) {
