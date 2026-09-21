@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.local
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.codex/
+.agents/
+*.bak
+*.backup.json

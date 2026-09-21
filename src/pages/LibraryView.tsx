@@ -1,0 +1,140 @@
+import { FileUp, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { db } from '../db'
+import { parseImportFile, parsePastedText, validateImport, type ImportCandidate } from '../lib/importer'
+import type { WordEntry, WordLibrary } from '../types'
+
+interface LibraryViewProps {
+  libraries: WordLibrary[]
+  words: WordEntry[]
+  onChanged: () => Promise<void>
+}
+
+export function LibraryView({ libraries, words, onChanged }: LibraryViewProps) {
+  const [selectedId, setSelectedId] = useState(libraries[0]?.id)
+  const [search, setSearch] = useState('')
+  const [showImport, setShowImport] = useState(false)
+  const [libraryName, setLibraryName] = useState('我的词库')
+  const [pasted, setPasted] = useState('')
+  const [preview, setPreview] = useState<ImportCandidate[]>([])
+  const [rawRecords, setRawRecords] = useState<Record<string, unknown>[]>([])
+  const [mapping, setMapping] = useState({ word: '', phonetic: '', partOfSpeech: '', meaning: '' })
+  const [editing, setEditing] = useState<WordEntry>()
+  const selected = libraries.find((library) => library.id === selectedId) ?? libraries[0]
+  const visibleWords = useMemo(() => words.filter((word) => word.libraryId === selected?.id && (!search || `${word.word} ${word.meaning}`.toLowerCase().includes(search.toLowerCase()))), [words, selected?.id, search])
+
+  function buildPreview(records: Record<string, unknown>[]) {
+    setRawRecords(records)
+    setPreview(validateImport(records, []))
+  }
+
+  function applyMapping() {
+    if (!mapping.word || !mapping.meaning) return
+    const remapped = rawRecords.map((record) => ({
+      word: record[mapping.word],
+      phonetic: mapping.phonetic ? record[mapping.phonetic] : '',
+      partOfSpeech: mapping.partOfSpeech ? record[mapping.partOfSpeech] : '',
+      meaning: record[mapping.meaning],
+    }))
+    setPreview(validateImport(remapped, []))
+  }
+
+  async function importFile(file?: File) {
+    if (!file) return
+    try {
+      buildPreview(await parseImportFile(file))
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '无法读取文件')
+    }
+  }
+
+  async function confirmImport() {
+    const valid = preview.filter((row) => row.status === 'valid')
+    if (!valid.length || valid.length > 20000) return
+    const id = `custom-${crypto.randomUUID()}`
+    const now = new Date().toISOString()
+    const library: WordLibrary = { id, name: libraryName.trim() || '我的词库', description: '用户导入词库', kind: 'custom', version: 1, wordCount: valid.length, createdAt: now, updatedAt: now }
+    const entries: WordEntry[] = valid.map((row) => ({ id: `${id}-${crypto.randomUUID()}`, libraryId: id, word: row.word, normalizedWord: row.word.trim().toLowerCase(), phonetic: row.phonetic, partOfSpeech: row.partOfSpeech, meaning: row.meaning, createdAt: now }))
+    await db.transaction('rw', db.libraries, db.words, async () => { await db.libraries.add(library); await db.words.bulkAdd(entries) })
+    setShowImport(false); setPreview([]); setPasted(''); setSelectedId(id)
+    await onChanged()
+  }
+
+  async function saveWord(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editing || !selected) return
+    const data = new FormData(event.currentTarget)
+    const word = String(data.get('word') ?? '').trim()
+    const meaning = String(data.get('meaning') ?? '').trim()
+    if (!word || !meaning) return
+    const isNew = !editing.id
+    const next = { ...editing, id: editing.id || `${selected.id}-${crypto.randomUUID()}`, word, normalizedWord: word.toLowerCase(), phonetic: String(data.get('phonetic') ?? ''), partOfSpeech: String(data.get('pos') ?? ''), meaning }
+    await db.words.put(next)
+    if (isNew) {
+      await db.libraries.update(selected.id, { wordCount: selected.wordCount + 1, updatedAt: new Date().toISOString() })
+    }
+    setEditing(undefined); await onChanged()
+  }
+
+  async function deleteWord(word: WordEntry) {
+    if (!selected || !window.confirm(`确定删除“${word.word}”吗？`)) return
+    await db.words.delete(word.id)
+    await db.libraries.update(selected.id, { wordCount: Math.max(0, selected.wordCount - 1), updatedAt: new Date().toISOString() })
+    await onChanged()
+  }
+
+  async function deleteLibrary() {
+    if (!selected || selected.kind !== 'custom' || !window.confirm(`确定删除词库“${selected.name}”及其中全部单词吗？`)) return
+    await db.transaction('rw', db.libraries, db.words, db.cards, async () => {
+      const ids = (await db.words.where('libraryId').equals(selected.id).primaryKeys()) as string[]
+      await db.cards.bulkDelete(ids); await db.words.where('libraryId').equals(selected.id).delete(); await db.libraries.delete(selected.id)
+    })
+    setSelectedId(libraries.find((item) => item.id !== selected.id)?.id ?? ''); await onChanged()
+  }
+
+  async function renameLibrary() {
+    if (!selected || selected.kind !== 'custom') return
+    const name = window.prompt('输入新的词库名称', selected.name)?.trim()
+    if (!name || name === selected.name) return
+    await db.libraries.update(selected.id, { name, updatedAt: new Date().toISOString() })
+    await onChanged()
+  }
+
+  const importColumns = rawRecords[0] ? Object.keys(rawRecords[0]) : []
+  const needsMapping = importColumns.length > 0 && !preview.some((row) => row.status === 'valid')
+
+  return <div className="page-content">
+    <div className="page-heading split-heading">
+      <div><p className="eyebrow">词库管理</p><h1>选择你要记住的词</h1><p>内置词库可直接学习，也可以把自己的清单留在本机。</p></div>
+      <button className="primary" onClick={() => setShowImport(true)}><FileUp size={18} />导入词库</button>
+    </div>
+    <div className="library-layout">
+      <aside className="library-list">
+        {libraries.map((library) => <button key={library.id} className={selected?.id === library.id ? 'library-tab active' : 'library-tab'} onClick={() => setSelectedId(library.id)}>
+          <span>{library.name}</span><small>{library.wordCount}词 · {library.kind === 'builtin' ? '内置' : '自定义'}</small>
+        </button>)}
+      </aside>
+      {selected && <section className="library-detail">
+        <div className="section-heading">
+          <div><h2>{selected.name}</h2><p>{selected.description}</p></div>
+          {selected.kind === 'custom' && <div className="row-actions"><button className="tool-button" onClick={renameLibrary}><Pencil size={16} />重命名</button><button className="tool-button" onClick={() => setEditing({ id: '', libraryId: selected.id, word: '', normalizedWord: '', meaning: '', createdAt: new Date().toISOString() })}><Plus size={16} />添加</button><button className="icon-button danger" onClick={deleteLibrary} aria-label="删除词库"><Trash2 /></button></div>}
+        </div>
+        <label className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索单词或释义" /></label>
+        <div className="word-table">
+          <div className="word-row table-head"><span>单词</span><span>词性与释义</span><span></span></div>
+          {visibleWords.slice(0, 300).map((word) => <div className="word-row" key={word.id}><span><strong>{word.word}</strong><small>{word.phonetic}</small></span><span><small>{word.partOfSpeech}</small>{word.meaning}</span><span>{selected.kind === 'custom' && <><button className="icon-button" onClick={() => setEditing(word)} aria-label="编辑"><Pencil /></button><button className="icon-button danger" onClick={() => deleteWord(word)} aria-label="删除"><Trash2 /></button></>}</span></div>)}
+          {!visibleWords.length && <div className="empty-state compact">没有匹配的单词</div>}
+        </div>
+      </section>}
+    </div>
+
+    {showImport && <div className="modal-backdrop"><section className="modal import-modal" role="dialog" aria-modal="true"><button className="icon-button modal-close" onClick={() => setShowImport(false)}><X /></button><p className="eyebrow">新建自定义词库</p><h2>导入单词清单</h2>
+      <label className="field"><span>词库名称</span><input value={libraryName} onChange={(event) => setLibraryName(event.target.value)} /></label>
+      <div className="import-source"><label className="upload-zone"><FileUp /><strong>选择 TXT、CSV、XLSX 或 JSON</strong><input type="file" accept=".txt,.csv,.xlsx,.json" onChange={(event) => importFile(event.target.files?.[0])} /></label><span>或</span><textarea value={pasted} onChange={(event) => setPasted(event.target.value)} placeholder={'每行一个单词，例如：\nmaintain | /meɪnˈteɪn/ | v. | 维持；保养'} /><button className="secondary" onClick={() => buildPreview(parsePastedText(pasted))} disabled={!pasted.trim()}>解析粘贴内容</button></div>
+      {needsMapping && <div className="column-mapping"><p><strong>没有识别出字段，请手动对应列</strong></p><div className="mapping-grid">{([['word', '单词 *'], ['meaning', '释义 *'], ['phonetic', '音标'], ['partOfSpeech', '词性']] as const).map(([field, label]) => <label key={field}><span>{label}</span><select value={mapping[field]} onChange={(event) => setMapping({ ...mapping, [field]: event.target.value })}><option value="">不选择</option>{importColumns.map((column) => <option value={column} key={column}>{column}</option>)}</select></label>)}</div><button className="secondary wide" disabled={!mapping.word || !mapping.meaning} onClick={applyMapping}>应用字段对应</button></div>}
+      {preview.length > 0 && <div className="import-preview"><div className="preview-summary"><span className="valid">可导入 {preview.filter((r) => r.status === 'valid').length}</span><span>重复 {preview.filter((r) => r.status === 'duplicate').length}</span><span className="invalid">错误 {preview.filter((r) => r.status === 'invalid').length}</span></div>{preview.slice(0, 8).map((row) => <div key={row.row} className={`preview-row ${row.status}`}><span>{row.row}</span><strong>{row.word || '空白'}</strong><span>{row.meaning || row.issue}</span></div>)}<button className="primary wide" onClick={confirmImport} disabled={!preview.some((row) => row.status === 'valid')}>确认导入</button></div>}
+    </section></div>}
+
+    {editing && <div className="modal-backdrop"><form className="modal edit-word-modal" onSubmit={saveWord}><button type="button" className="icon-button modal-close" onClick={() => setEditing(undefined)}><X /></button><p className="eyebrow">{editing.id ? '编辑词条' : '新增词条'}</p><h2>词条信息</h2><label className="field"><span>单词 *</span><input name="word" defaultValue={editing.word} required /></label><div className="form-grid"><label className="field"><span>音标</span><input name="phonetic" defaultValue={editing.phonetic} /></label><label className="field"><span>词性</span><input name="pos" defaultValue={editing.partOfSpeech} /></label></div><label className="field"><span>中文释义 *</span><textarea name="meaning" defaultValue={editing.meaning} required /></label><button className="primary wide">保存词条</button></form></div>}
+  </div>
+}
