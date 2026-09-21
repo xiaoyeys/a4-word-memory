@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Home, Library, Settings } from 'lucide-react'
+import { BarChart3, BookOpen, Home, Library, RefreshCw, Settings } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 export type ViewName = 'home' | 'setup' | 'study' | 'libraries' | 'stats' | 'settings'
@@ -8,6 +8,8 @@ interface ShellProps {
   onNavigate: (view: ViewName) => void
   children: ReactNode
   studyActive?: boolean
+  updateAvailable?: boolean
+  onUpdate?: () => void
 }
 
 const items = [
@@ -18,7 +20,7 @@ const items = [
   { id: 'settings' as const, label: '设置', icon: Settings },
 ]
 
-export function Shell({ view, onNavigate, children, studyActive }: ShellProps) {
+export function Shell({ view, onNavigate, children, studyActive, updateAvailable, onUpdate }: ShellProps) {
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -28,6 +30,7 @@ export function Shell({ view, onNavigate, children, studyActive }: ShellProps) {
         </button>
         {studyActive && <span className="active-study-dot">学习进行中</span>}
       </header>
+      {updateAvailable && <div className="update-banner"><span>发现新版本</span>{view === 'study' ? <small>完成或暂时离开本轮学习后即可更新</small> : <button onClick={onUpdate}><RefreshCw size={15} />立即更新</button>}</div>}
       <main className={view === 'study' ? 'main study-main' : 'main'}>{children}</main>
       {view !== 'study' && (
         <nav className="bottom-nav" aria-label="主导航">

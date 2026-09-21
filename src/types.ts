@@ -95,6 +95,8 @@ export interface AppSettings {
   allowRecentRepeat: boolean
   showSequence: boolean
   onboardingDone: boolean
+  backupReminderShown: boolean
+  lastBackupAt?: string
 }
 
 export interface SessionSummary {
@@ -115,4 +117,5 @@ export const defaultSettings: AppSettings = {
   allowRecentRepeat: false,
   showSequence: false,
   onboardingDone: false,
+  backupReminderShown: false,
 }

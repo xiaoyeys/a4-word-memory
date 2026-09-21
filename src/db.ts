@@ -32,8 +32,9 @@ export const db = new A4Database()
 export async function initializeDatabase() {
   for (const library of builtinLibraries) {
     const existing = await db.libraries.get(library.id)
-    const existingWords = await db.words.where('libraryId').equals(library.id).toArray()
-    if (!existing || existing.version < library.version || existingWords.length !== library.wordCount) {
+    const existingCount = await db.words.where('libraryId').equals(library.id).count()
+    if (!existing || existing.version < library.version || existingCount !== library.wordCount) {
+      const existingWords = await db.words.where('libraryId').equals(library.id).toArray()
       const words = await loadBuiltinWords(library, existingWords)
       await db.transaction('rw', db.libraries, db.words, async () => {
         await db.libraries.put(library)
@@ -50,7 +51,8 @@ export async function initializeDatabase() {
 }
 
 export async function getSettings() {
-  return (await db.settings.get('app'))?.value ?? defaultSettings
+  const stored = (await db.settings.get('app'))?.value
+  return stored ? { ...defaultSettings, ...stored } : defaultSettings
 }
 
 export async function saveSettings(value: AppSettings) {

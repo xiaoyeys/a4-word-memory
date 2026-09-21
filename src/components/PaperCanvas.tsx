@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, LocateFixed, Maximize2, Minimize2, Minus, Plus, Volume2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FilePlus2, LocateFixed, Maximize2, Minimize2, Minus, Plus, Volume2 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import type { PlacedWord } from '../types'
 import { isValidPlacement, PAGE_HEIGHT, PAGE_WIDTH } from '../lib/study'
@@ -10,6 +10,7 @@ interface PaperCanvasProps {
   onPageChange: (page: number) => void
   onWordClick: (item: PlacedWord) => void
   onPreview: (preview: Omit<PlacedWord, 'wordId' | 'order'>) => void
+  onInvalidPlacement?: () => void
   preview?: Omit<PlacedWord, 'wordId' | 'order'>
   placing?: { word: string; width: number; height: number; fontSize: number }
   showSequence: boolean
@@ -23,8 +24,11 @@ interface PaperCanvasProps {
 
 export function PaperCanvas(props: PaperCanvasProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const pinch = useRef<{ distance: number; zoom: number; centerX: number; centerY: number; scrollLeft: number; scrollTop: number } | undefined>(undefined)
   const [zoom, setZoom] = useState(1)
-  const pages = Math.max(1, ...props.placed.map((item) => item.page + 1), props.preview ? props.preview.page + 1 : 1)
+  const pages = Math.max(1, props.currentPage + 1, ...props.placed.map((item) => item.page + 1), props.preview ? props.preview.page + 1 : 1)
   const pageWords = useMemo(() => props.placed.filter((item) => item.page === props.currentPage), [props.placed, props.currentPage])
 
   function selectPoint(event: React.MouseEvent<HTMLDivElement>) {
@@ -35,6 +39,48 @@ export function PaperCanvas(props: PaperCanvasProps) {
     const y = (event.clientY - bounds.top) / scale - props.placing.height / 2
     const candidate = { page: props.currentPage, x, y, width: props.placing.width, height: props.placing.height, fontSize: props.placing.fontSize }
     if (isValidPlacement(candidate, props.placed)) props.onPreview(candidate)
+    else props.onInvalidPlacement?.()
+  }
+
+  function pointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!props.mobileExpanded || event.pointerType !== 'touch') return
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    event.currentTarget.setPointerCapture(event.pointerId)
+    if (pointers.current.size === 2 && scrollRef.current) {
+      const [a, b] = [...pointers.current.values()]
+      const bounds = scrollRef.current.getBoundingClientRect()
+      pinch.current = {
+        distance: Math.hypot(a.x - b.x, a.y - b.y),
+        zoom,
+        centerX: (a.x + b.x) / 2 - bounds.left,
+        centerY: (a.y + b.y) / 2 - bounds.top,
+        scrollLeft: scrollRef.current.scrollLeft,
+        scrollTop: scrollRef.current.scrollTop,
+      }
+    }
+  }
+
+  function pointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!pointers.current.has(event.pointerId)) return
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (pointers.current.size !== 2 || !pinch.current || !scrollRef.current) return
+    event.preventDefault()
+    const [a, b] = [...pointers.current.values()]
+    const distance = Math.hypot(a.x - b.x, a.y - b.y)
+    const gesture = pinch.current
+    const nextZoom = Math.max(.72, Math.min(1.7, gesture.zoom * distance / Math.max(1, gesture.distance)))
+    const ratio = nextZoom / gesture.zoom
+    setZoom(nextZoom)
+    const scroll = scrollRef.current
+    requestAnimationFrame(() => {
+      scroll.scrollLeft = (gesture.scrollLeft + gesture.centerX) * ratio - gesture.centerX
+      scroll.scrollTop = (gesture.scrollTop + gesture.centerY) * ratio - gesture.centerY
+    })
+  }
+
+  function pointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    pointers.current.delete(event.pointerId)
+    if (pointers.current.size < 2) pinch.current = undefined
   }
 
   return (
@@ -47,13 +93,14 @@ export function PaperCanvas(props: PaperCanvasProps) {
         </div>
         <div className="paper-actions">
           {props.canHint && <button className="tool-button" onClick={props.onHint}><LocateFixed size={17} />提示位置</button>}
+          {props.placing && <button className="tool-button new-paper-button" onClick={() => props.onPageChange(pages)}><FilePlus2 size={17} /><span>新建一页</span></button>}
           <button className="tool-button mobile-paper-toggle" onClick={props.onMobileToggle} aria-label={props.mobileExpanded ? '返回单词卡片' : '放大A4纸'}>{props.mobileExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}<span>{props.mobileExpanded ? '返回卡片' : '放大纸张'}</span></button>
           <button className="icon-button" onClick={() => setZoom(Math.max(.72, zoom - .12))} aria-label="缩小纸张"><Minus /></button>
           <span className="zoom-label">{Math.round(zoom * 100)}%</span>
           <button className="icon-button" onClick={() => setZoom(Math.min(1.7, zoom + .12))} aria-label="放大纸张"><Plus /></button>
         </div>
       </div>
-      <div className="paper-scroll" onClick={() => { if (!props.mobileExpanded && !props.placing) props.onMobileToggle() }}>
+      <div ref={scrollRef} className="paper-scroll" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onClick={() => { if (!props.mobileExpanded && !props.placing) props.onMobileToggle() }}>
         <div className="paper-zoom" style={{ width: `${zoom * 100}%` }}>
           <div ref={ref} className={props.placing ? 'a4-paper placing' : 'a4-paper'} onClick={selectPoint}>
             {pageWords.map((item) => {

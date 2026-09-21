@@ -9,6 +9,7 @@ export interface ImportCandidate {
   meaning: string
   status: 'valid' | 'duplicate' | 'invalid'
   issue?: string
+  matchedFromBuiltin?: boolean
 }
 
 const aliases = {
@@ -25,6 +26,35 @@ function cleanKey(value: unknown) {
 function findField(record: Record<string, unknown>, names: string[]) {
   const target = Object.keys(record).find((key) => names.map(cleanKey).includes(cleanKey(key)))
   return target ? String(record[target] ?? '').trim() : ''
+}
+
+export function findReferenceWord(value: string, references: WordEntry[]) {
+  const normalized = normalizeWord(value)
+  if (!normalized) return undefined
+  return references.find((word) => word.normalizedWord === normalized)
+}
+
+export function enrichImportRecords(records: Record<string, unknown>[], references: WordEntry[]) {
+  const lookup = new Map<string, WordEntry>()
+  for (const word of references) {
+    const current = lookup.get(word.normalizedWord)
+    const score = Number(Boolean(word.phonetic)) + Number(Boolean(word.partOfSpeech))
+    const currentScore = current ? Number(Boolean(current.phonetic)) + Number(Boolean(current.partOfSpeech)) : -1
+    if (!current || score > currentScore) lookup.set(word.normalizedWord, word)
+  }
+  return records.map((record) => {
+    const word = findField(record, aliases.word)
+    const reference = lookup.get(normalizeWord(word))
+    if (!reference) return record
+    return {
+      ...record,
+      word,
+      phonetic: findField(record, aliases.phonetic) || reference.phonetic || '',
+      partOfSpeech: findField(record, aliases.partOfSpeech) || reference.partOfSpeech || '',
+      meaning: findField(record, aliases.meaning) || reference.meaning,
+      __matchedFromBuiltin: true,
+    }
+  })
 }
 
 function recordsFromText(text: string) {
@@ -63,9 +93,10 @@ export async function parseImportFile(file: File): Promise<Record<string, unknow
   const extension = file.name.split('.').pop()?.toLowerCase()
   if (extension === 'json') {
     const parsed = JSON.parse(await file.text())
-    const data = Array.isArray(parsed) ? parsed : parsed.words ?? parsed.data
+    const data = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? parsed.words ?? parsed.data : undefined
     if (!Array.isArray(data)) throw new Error('JSON 中未找到词条数组')
-    return data
+    if (!data.every((item) => item && typeof item === 'object' && !Array.isArray(item))) throw new Error('JSON 词条必须是对象')
+    return data as Record<string, unknown>[]
   }
   if (extension === 'xlsx' || extension === 'xls' || extension === 'csv') {
     if (extension === 'csv') return recordsFromCsv(await file.text())
@@ -90,7 +121,7 @@ export function validateImport(records: Record<string, unknown>[], existing: Wor
     const meaning = findField(record, aliases.meaning)
     const normalized = normalizeWord(word)
     if (!word || !meaning) {
-      return { row: index + 1, word, phonetic: '', partOfSpeech: '', meaning, status: 'invalid', issue: '缺少单词或释义' }
+      return { row: index + 1, word, phonetic: '', partOfSpeech: '', meaning, status: 'invalid', issue: word ? '未在内置词库中匹配到释义，请补充释义' : '缺少单词' }
     }
     if (seen.has(normalized)) {
       return { row: index + 1, word, phonetic: '', partOfSpeech: '', meaning, status: 'duplicate', issue: '重复单词' }
@@ -103,6 +134,7 @@ export function validateImport(records: Record<string, unknown>[], existing: Wor
       partOfSpeech: findField(record, aliases.partOfSpeech),
       meaning,
       status: 'valid',
+      matchedFromBuiltin: record.__matchedFromBuiltin === true,
     }
   })
 }

@@ -86,6 +86,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   const [highlightedId, setHighlightedId] = useState<string>()
   const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
   const [mobileSurface, setMobileSurface] = useState<'card' | 'paper'>(initial.stage === 'recall' ? 'paper' : 'card')
+  const [nextReviewAt, setNextReviewAt] = useState<string>()
   const audioRef = useRef<HTMLAudioElement | undefined>(undefined)
   const dragOffset = useRef<{ x: number; y: number } | undefined>(undefined)
   const wordsById = useMemo(() => new Map(words.map((word) => [word.id, word])), [words])
@@ -103,16 +104,15 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     return () => synthesis.removeEventListener('voiceschanged', refreshVoices)
   }, [])
 
+  useEffect(() => () => {
+    audioRef.current?.pause()
+    window.speechSynthesis?.cancel()
+  }, [])
+
   useEffect(() => {
     if (session.stage === 'recall') setMobileSurface('paper')
     else if (session.stage === 'learn' || session.stage === 'relearn' || session.stage === 'spell') setMobileSurface('card')
   }, [session.stage])
-
-  useEffect(() => {
-    const value = { ...session, updatedAt: new Date().toISOString() }
-    const timer = window.setTimeout(() => db.sessions.put(value), 80)
-    return () => window.clearTimeout(timer)
-  }, [session])
 
   useEffect(() => {
     localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(panelPosition))
@@ -183,14 +183,25 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
 
   async function update(next: StudySession) {
     const value = { ...next, updatedAt: new Date().toISOString() }
-    setSession(value)
-    await db.sessions.put(value)
+    try {
+      await db.sessions.put(value)
+      setSession(value)
+    } catch {
+      setMessage('学习进度保存失败，可能是本地存储空间不足。请先导出备份并释放浏览器空间。')
+    }
   }
 
   async function complete(next: StudySession) {
-    const finished = await finishSession(next)
-    setSession(finished)
-    onFinish(finished)
+    try {
+      const finished = await finishSession(next)
+      const cards = (await db.cards.bulkGet(finished.wordIds)).filter(Boolean)
+      const nextDue = cards.map((card) => new Date(card!.card.due).getTime()).filter(Number.isFinite).sort((a, b) => a - b)[0]
+      if (nextDue) setNextReviewAt(new Date(nextDue).toISOString())
+      setSession(finished)
+      onFinish(finished)
+    } catch {
+      setMessage('本轮结果保存失败，请先不要关闭页面，并检查浏览器可用存储空间。')
+    }
   }
 
   async function endRecallOrContinue(next: StudySession) {
@@ -328,6 +339,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
           <div><strong>{summary.remembered}</strong><span>记得次数</span></div>
           <div><strong>{summary.forgotten}</strong><span>忘记次数</span></div>
         </div>
+        {nextReviewAt && <p className="next-review">本轮最早复习时间：<strong>{new Date(nextReviewAt).toLocaleString('zh-CN')}</strong></p>}
         <button className="primary" onClick={onExit}>返回首页</button>
       </div>
     )
@@ -357,6 +369,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
         onPageChange={setCurrentPage}
         onWordClick={selectPaperWord}
         onPreview={(preview) => update({ ...session, preview })}
+        onInvalidPlacement={() => setMessage('这里空间不足或超出纸面，请换一个位置，或新建下一页')}
         preview={session.preview}
         placing={placingBox}
         showSequence={settings.showSequence}
