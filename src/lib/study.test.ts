@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Rating, createEmptyCard } from 'ts-fsrs'
 import type { RecallEvent, StoredCard, WordEntry } from '../types'
-import { aggregateRating, estimateWordBox, isValidPlacement, normalizeWord, pickWords, scheduleCard } from './study'
+import { aggregateRating, dailyPlan, estimateWordBox, isValidPlacement, normalizeWord, pickWords, scheduleCard } from './study'
 
 const event = (rating: RecallEvent['rating'], index: number): RecallEvent => ({
   id: String(index), wordId: 'word-1', rating, round: 1, createdAt: new Date(2026, 0, index + 1).toISOString(),
@@ -47,6 +47,15 @@ describe('study rules', () => {
     const dueCard = createEmptyCard(new Date(Date.now() - 86400000))
     const cards = new Map<string, StoredCard>([['due', { wordId: 'due', card: dueCard, lastStudiedAt: new Date(Date.now() - 5 * 86400000).toISOString() }]])
     expect(pickWords(words, cards, 1, 'random', false).map((item) => item.id)).toEqual(['due'])
+  })
+
+  it('builds a daily plan from all due words plus the fixed new-word target', () => {
+    const words = ['new-a', 'new-b', 'due'].map(word)
+    const dueCard = createEmptyCard(new Date(Date.now() - 86400000))
+    const cards = new Map<string, StoredCard>([['due', { wordId: 'due', card: dueCard }]])
+    expect(dailyPlan(words, cards, 1)).toEqual({ dueCount: 1, availableNewCount: 2, newCount: 1, totalCount: 2 })
+    expect(pickWords(words, cards, 1, 'daily', false).map((item) => item.id)).toContain('due')
+    expect(pickWords(words, cards, 1, 'daily', false)).toHaveLength(2)
   })
 
   it('advances an FSRS card and produces a future due date', () => {

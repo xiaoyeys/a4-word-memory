@@ -16,6 +16,8 @@ describe('backup validation', () => {
       settings: [{ key: 'app', value: {} }],
     }))
     expect(data.words).toHaveLength(1)
+    expect(data.version).toBe(2)
+    expect(data.memoryPapers).toEqual([])
   })
 
   it('rejects a backup with invalid card dates', async () => {

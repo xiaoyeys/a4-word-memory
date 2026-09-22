@@ -13,6 +13,7 @@ export async function createStudySession(options: {
   const storedCards = await db.cards.bulkGet(options.words.map((word) => word.id))
   const cards = new Map(storedCards.filter(Boolean).map((card) => [card!.wordId, card!]))
   const selected = pickWords(options.words, cards, options.count, options.mode, options.allowRecent)
+  const newWordIds = selected.filter((word) => !cards.has(word.id)).map((word) => word.id)
   const now = new Date().toISOString()
   const session: StudySession = {
     id: crypto.randomUUID(),
@@ -22,6 +23,7 @@ export async function createStudySession(options: {
     placementMode: options.placementMode,
     targetCount: selected.length,
     wordIds: selected.map((word) => word.id),
+    newWordIds,
     placed: [],
     stage: 'learn',
     currentWordIndex: 0,

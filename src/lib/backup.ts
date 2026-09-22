@@ -1,7 +1,7 @@
 import { db } from '../db'
-import type { AppSettings, StoredCard, StudySession, WordEntry, WordLibrary } from '../types'
+import type { AppSettings, MemoryFolder, MemoryPaper, StoredCard, StudySession, WordEntry, WordLibrary } from '../types'
 
-const BACKUP_VERSION = 1
+const BACKUP_VERSION = 2
 
 interface BackupPayload {
   product: 'A4词忆'
@@ -12,6 +12,8 @@ interface BackupPayload {
   sessions: StudySession[]
   cards: StoredCard[]
   settings: Array<{ key: 'app'; value: AppSettings }>
+  memoryFolders: MemoryFolder[]
+  memoryPapers: MemoryPaper[]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -32,6 +34,8 @@ async function buildBackup(): Promise<BackupPayload> {
     sessions: await db.sessions.toArray(),
     cards: await db.cards.toArray(),
     settings: await db.settings.toArray(),
+    memoryFolders: await db.memoryFolders.toArray(),
+    memoryPapers: await db.memoryPapers.toArray(),
   }
 }
 
@@ -53,30 +57,37 @@ export async function exportBackup() {
 export async function inspectBackup(file: File) {
   const data: unknown = JSON.parse(await file.text())
   if (!isRecord(data)) throw new Error('备份文件结构不完整')
-  if (data.product !== 'A4词忆' || data.version !== BACKUP_VERSION) throw new Error('备份文件版本不兼容')
+  if (data.product !== 'A4词忆' || (data.version !== 1 && data.version !== BACKUP_VERSION)) throw new Error('备份文件版本不兼容')
   if (![data.libraries, data.words, data.sessions, data.cards, data.settings].every(Array.isArray)) throw new Error('备份文件结构不完整')
+  if (data.version === BACKUP_VERSION && ![data.memoryFolders, data.memoryPapers].every(Array.isArray)) throw new Error('备份文件结构不完整')
   if (!validDate(data.exportedAt)) throw new Error('备份时间无效')
   const libraries = data.libraries as unknown[]
   const words = data.words as unknown[]
   const sessions = data.sessions as unknown[]
   const cards = data.cards as unknown[]
   const settings = data.settings as unknown[]
+  const memoryFolders = data.version === BACKUP_VERSION ? data.memoryFolders as unknown[] : []
+  const memoryPapers = data.version === BACKUP_VERSION ? data.memoryPapers as unknown[] : []
   if (!libraries.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.wordCount === 'number')) throw new Error('备份中的词库数据无效')
   if (!words.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.libraryId === 'string' && typeof item.word === 'string' && typeof item.meaning === 'string')) throw new Error('备份中的词条数据无效')
   if (!sessions.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.libraryId === 'string' && Array.isArray(item.wordIds) && Array.isArray(item.events))) throw new Error('备份中的学习记录无效')
   if (!cards.every((item) => isRecord(item) && typeof item.wordId === 'string' && isRecord(item.card) && validDate(item.card.due))) throw new Error('备份中的复习排程无效')
   if (!settings.every((item) => isRecord(item) && item.key === 'app' && isRecord(item.value))) throw new Error('备份中的设置无效')
-  return data as unknown as BackupPayload
+  if (!memoryFolders.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.name === 'string' && (item.kind === 'library' || item.kind === 'custom'))) throw new Error('备份中的记忆纸文件夹无效')
+  if (!memoryPapers.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.sourceSessionId === 'string' && typeof item.folderId === 'string' && Array.isArray(item.placed) && Array.isArray(item.words))) throw new Error('备份中的记忆纸无效')
+  return { ...data, version: BACKUP_VERSION, memoryFolders, memoryPapers } as unknown as BackupPayload
 }
 
 export async function restoreBackup(data: BackupPayload) {
   downloadPayload(await buildBackup(), '恢复前')
-  await db.transaction('rw', db.libraries, db.words, db.sessions, db.cards, db.settings, async () => {
-    await Promise.all([db.libraries.clear(), db.words.clear(), db.sessions.clear(), db.cards.clear(), db.settings.clear()])
+  await db.transaction('rw', [db.libraries, db.words, db.sessions, db.cards, db.settings, db.memoryFolders, db.memoryPapers], async () => {
+    await Promise.all([db.libraries.clear(), db.words.clear(), db.sessions.clear(), db.cards.clear(), db.settings.clear(), db.memoryFolders.clear(), db.memoryPapers.clear()])
     await db.libraries.bulkPut(data.libraries)
     await db.words.bulkPut(data.words)
     await db.sessions.bulkPut(data.sessions)
     await db.cards.bulkPut(data.cards)
     await db.settings.bulkPut(data.settings)
+    await db.memoryFolders.bulkPut(data.memoryFolders)
+    await db.memoryPapers.bulkPut(data.memoryPapers)
   })
 }

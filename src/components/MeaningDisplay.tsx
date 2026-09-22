@@ -1,0 +1,45 @@
+interface MeaningPart {
+  label?: string
+  text: string
+}
+
+const partOfSpeechPattern = /(?:^|[；;]\s*)((?:n|v|vt|vi|adj|a|adv|ad|prep|conj|pron|num|art|int|interj|aux)\.)\s*/gi
+
+function tidyMeaning(value: string) {
+  return value.trim().replace(/,\s*/g, '、')
+}
+
+function canonicalLabel(value: string) {
+  const label = value.trim().toLowerCase()
+  if (label === 'a.' || label === 'a') return 'adj.'
+  if (label === 'ad.' || label === 'ad') return 'adv.'
+  return label
+}
+
+export function formatPartOfSpeech(value?: string) {
+  if (!value) return undefined
+  return value.split('/').map(canonicalLabel).join('/')
+}
+
+export function splitMeaning(meaning: string, fallbackPartOfSpeech?: string): MeaningPart[] {
+  const matches = [...meaning.matchAll(partOfSpeechPattern)]
+  if (!matches.length) return [{ label: formatPartOfSpeech(fallbackPartOfSpeech), text: tidyMeaning(meaning) }]
+
+  const parts = matches.map((match, index) => {
+    const start = match.index! + match[0].length
+    const end = matches[index + 1]?.index ?? meaning.length
+    return { label: canonicalLabel(match[1]), text: tidyMeaning(meaning.slice(start, end)) }
+  }).filter((part) => part.text)
+
+  return parts.length ? parts : [{ label: formatPartOfSpeech(fallbackPartOfSpeech), text: tidyMeaning(meaning) }]
+}
+
+export function MeaningDisplay({ meaning, partOfSpeech, compact = false }: { meaning: string; partOfSpeech?: string; compact?: boolean }) {
+  const parts = splitMeaning(meaning, partOfSpeech)
+  return <div className={compact ? 'meaning-display compact' : 'meaning-display'}>
+    {parts.map((part, index) => <div className="meaning-line" key={`${part.label ?? 'meaning'}-${index}`}>
+      {part.label && <span className="meaning-pos">{part.label}</span>}
+      <span className="meaning-text">{part.text}</span>
+    </div>)}
+  </div>
+}

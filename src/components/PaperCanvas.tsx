@@ -20,6 +20,7 @@ interface PaperCanvasProps {
   onHint?: () => void
   mobileExpanded: boolean
   onMobileToggle: () => void
+  showMobileToggle?: boolean
 }
 
 export function PaperCanvas(props: PaperCanvasProps) {
@@ -94,13 +95,13 @@ export function PaperCanvas(props: PaperCanvasProps) {
         <div className="paper-actions">
           {props.canHint && <button className="tool-button" onClick={props.onHint}><LocateFixed size={17} />提示位置</button>}
           {props.placing && <button className="tool-button new-paper-button" onClick={() => props.onPageChange(pages)}><FilePlus2 size={17} /><span>新建一页</span></button>}
-          <button className="tool-button mobile-paper-toggle" onClick={props.onMobileToggle} aria-label={props.mobileExpanded ? '返回单词卡片' : '放大A4纸'}>{props.mobileExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}<span>{props.mobileExpanded ? '返回卡片' : '放大纸张'}</span></button>
+          {props.showMobileToggle !== false && <button className="tool-button mobile-paper-toggle" onClick={props.onMobileToggle} aria-label={props.mobileExpanded ? '返回单词卡片' : '放大A4纸'}>{props.mobileExpanded ? <Minimize2 size={17} /> : <Maximize2 size={17} />}<span>{props.mobileExpanded ? '返回卡片' : '放大纸张'}</span></button>}
           <button className="icon-button" onClick={() => setZoom(Math.max(.72, zoom - .12))} aria-label="缩小纸张"><Minus /></button>
           <span className="zoom-label">{Math.round(zoom * 100)}%</span>
           <button className="icon-button" onClick={() => setZoom(Math.min(1.7, zoom + .12))} aria-label="放大纸张"><Plus /></button>
         </div>
       </div>
-      <div ref={scrollRef} className="paper-scroll" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onClick={() => { if (!props.mobileExpanded && !props.placing) props.onMobileToggle() }}>
+      <div ref={scrollRef} className="paper-scroll" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onClick={() => { if (props.showMobileToggle !== false && !props.mobileExpanded && !props.placing) props.onMobileToggle() }}>
         <div className="paper-zoom" style={{ width: `${zoom * 100}%` }}>
           <div ref={ref} className={props.placing ? 'a4-paper placing' : 'a4-paper'} onClick={selectPoint}>
             {pageWords.map((item) => {

@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { AppSettings, StoredCard, StudySession, WordEntry, WordLibrary } from './types'
+import type { AppSettings, MemoryFolder, MemoryPaper, StoredCard, StudySession, WordEntry, WordLibrary } from './types'
 import { builtinLibraries, loadBuiltinWords } from './data/seed'
 import { defaultSettings } from './types'
 
@@ -14,6 +14,8 @@ class A4Database extends Dexie {
   sessions!: EntityTable<StudySession, 'id'>
   cards!: EntityTable<StoredCard, 'wordId'>
   settings!: EntityTable<SettingRow, 'key'>
+  memoryFolders!: EntityTable<MemoryFolder, 'id'>
+  memoryPapers!: EntityTable<MemoryPaper, 'id'>
 
   constructor() {
     super('a4-word-memory-v1')
@@ -23,6 +25,15 @@ class A4Database extends Dexie {
       sessions: 'id, libraryId, status, startedAt, completedAt',
       cards: 'wordId, lastStudiedAt',
       settings: 'key',
+    })
+    this.version(2).stores({
+      libraries: 'id, kind, updatedAt',
+      words: 'id, libraryId, normalizedWord, [libraryId+normalizedWord]',
+      sessions: 'id, libraryId, status, startedAt, completedAt',
+      cards: 'wordId, lastStudiedAt',
+      settings: 'key',
+      memoryFolders: 'id, kind, libraryId, order, updatedAt',
+      memoryPapers: 'id, sourceSessionId, folderId, libraryId, favorite, removed, completedAt, updatedAt',
     })
   }
 }

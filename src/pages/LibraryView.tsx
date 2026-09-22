@@ -1,19 +1,36 @@
-import { FileUp, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
+import { CheckCircle2, FileUp, LibraryBig, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { db } from '../db'
 import { enrichImportRecords, findReferenceWord, parseImportFile, parsePastedText, validateImport, type ImportCandidate } from '../lib/importer'
 import { normalizeWord } from '../lib/study'
+import { formatPartOfSpeech } from '../components/MeaningDisplay'
 import type { WordEntry, WordLibrary } from '../types'
 
 interface LibraryViewProps {
   libraries: WordLibrary[]
   words: WordEntry[]
+  currentLibraryId?: string
+  onSelect: (libraryId: string) => Promise<void>
   onChanged: () => Promise<void>
 }
 
-export function LibraryView({ libraries, words, onChanged }: LibraryViewProps) {
-  const [selectedId, setSelectedId] = useState(libraries[0]?.id)
+const categories = ['全部', '四级', '六级', '考研', 'IELTS', 'TOEFL', '其他', '自定义'] as const
+
+function libraryCategory(library: WordLibrary) {
+  if (library.kind === 'custom') return '自定义'
+  if (library.name.includes('CET-4')) return '四级'
+  if (library.name.includes('CET-6')) return '六级'
+  if (library.name.includes('考研')) return '考研'
+  if (library.name.includes('IELTS')) return 'IELTS'
+  if (library.name.includes('TOEFL')) return 'TOEFL'
+  return '其他'
+}
+
+export function LibraryView({ libraries, words, currentLibraryId, onSelect, onChanged }: LibraryViewProps) {
+  const [selectedId, setSelectedId] = useState(currentLibraryId ?? libraries[0]?.id)
   const [search, setSearch] = useState('')
+  const [bookSearch, setBookSearch] = useState('')
+  const [category, setCategory] = useState<(typeof categories)[number]>('全部')
   const [showImport, setShowImport] = useState(false)
   const [libraryName, setLibraryName] = useState('我的词库')
   const [pasted, setPasted] = useState('')
@@ -25,6 +42,7 @@ export function LibraryView({ libraries, words, onChanged }: LibraryViewProps) {
   const visibleWords = useMemo(() => words.filter((word) => word.libraryId === selected?.id && (!search || `${word.word} ${word.meaning}`.toLowerCase().includes(search.toLowerCase()))), [words, selected?.id, search])
   const builtinIds = useMemo(() => new Set(libraries.filter((library) => library.kind === 'builtin').map((library) => library.id)), [libraries])
   const referenceWords = useMemo(() => words.filter((word) => builtinIds.has(word.libraryId)), [words, builtinIds])
+  const visibleLibraries = libraries.filter((library) => (category === '全部' || libraryCategory(library) === category) && (!bookSearch || library.name.toLowerCase().includes(bookSearch.toLowerCase())))
 
   function buildPreview(records: Record<string, unknown>[]) {
     setRawRecords(records)
@@ -65,6 +83,7 @@ export function LibraryView({ libraries, words, onChanged }: LibraryViewProps) {
     await db.transaction('rw', db.libraries, db.words, async () => { await db.libraries.add(library); await db.words.bulkAdd(entries) })
     setShowImport(false); setPreview([]); setPasted(''); setSelectedId(id)
     await onChanged()
+    await onSelect(id)
   }
 
   async function saveWord(event: React.FormEvent<HTMLFormElement>) {
@@ -129,11 +148,17 @@ export function LibraryView({ libraries, words, onChanged }: LibraryViewProps) {
   const importColumns = rawRecords[0] ? Object.keys(rawRecords[0]) : []
   const needsMapping = importColumns.length > 0 && !preview.some((row) => row.status === 'valid')
 
-  return <div className="page-content">
+  return <div className="page-content book-picker-page">
     <div className="page-heading split-heading">
-      <div><p className="eyebrow">词库管理</p><h1>选择你要记住的词</h1><p>内置词库可直接学习，也可以把自己的清单留在本机。</p></div>
-      <button className="primary" onClick={() => setShowImport(true)}><FileUp size={18} />导入词库</button>
+      <div><p className="eyebrow">当前只专注一本</p><h1>更换词书</h1><p>选择后，首页计划和统计都会切换到这本词书。</p></div>
+      <button className="secondary" onClick={() => setShowImport(true)}><FileUp size={18} />导入自定义词书</button>
     </div>
+    <section className="book-picker-tools"><label className="search-box"><Search size={17} /><input value={bookSearch} onChange={(event) => setBookSearch(event.target.value)} placeholder="搜索词书" /></label><div className="book-categories">{categories.map((item) => <button key={item} className={category === item ? 'active' : ''} onClick={() => setCategory(item)}>{item}</button>)}</div></section>
+    <section className="book-grid">{visibleLibraries.map((library) => {
+      const active = library.id === currentLibraryId
+      return <button key={library.id} className={active ? 'book-option active' : 'book-option'} onClick={() => void onSelect(library.id)}><span className={`book-cover small-cover category-${libraryCategory(library).toLowerCase()}`}><span>{library.name.split(' ')[0]}</span><small>{library.kind === 'custom' ? '我的词书' : library.name.split(' ').slice(1).join(' ')}</small></span><span className="book-option-copy"><strong>{library.name}</strong><small>{library.wordCount} 词 · {library.kind === 'builtin' ? '内置词书' : '自定义词书'}</small></span>{active && <CheckCircle2 />}</button>
+    })}{!visibleLibraries.length && <div className="empty-state compact">没有匹配的词书</div>}</section>
+    <div className="library-manage-heading"><div><span className="section-kicker"><LibraryBig size={16} />词条预览与管理</span><h2>{selected?.name}</h2></div>{currentLibraryId !== selected?.id && selected && <button className="secondary" onClick={() => void onSelect(selected.id)}>设为当前词书</button>}</div>
     <div className="library-layout">
       <aside className="library-list">
         {libraries.map((library) => <button key={library.id} className={selected?.id === library.id ? 'library-tab active' : 'library-tab'} onClick={() => setSelectedId(library.id)}>
@@ -148,7 +173,7 @@ export function LibraryView({ libraries, words, onChanged }: LibraryViewProps) {
         <label className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索单词或释义" /></label>
         <div className="word-table">
           <div className="word-row table-head"><span>单词</span><span>词性与释义</span><span></span></div>
-          {visibleWords.slice(0, 300).map((word) => <div className="word-row" key={word.id}><span><strong>{word.word}</strong><small>{word.phonetic}</small></span><span><small>{word.partOfSpeech}</small>{word.meaning}</span><span>{selected.kind === 'custom' && <><button className="icon-button" onClick={() => setEditing(word)} aria-label="编辑"><Pencil /></button><button className="icon-button danger" onClick={() => deleteWord(word)} aria-label="删除"><Trash2 /></button></>}</span></div>)}
+          {visibleWords.slice(0, 300).map((word) => <div className="word-row" key={word.id}><span><strong>{word.word}</strong><small>{word.phonetic}</small></span><span><small>{formatPartOfSpeech(word.partOfSpeech)}</small>{word.meaning}</span><span>{selected.kind === 'custom' && <><button className="icon-button" onClick={() => setEditing(word)} aria-label="编辑"><Pencil /></button><button className="icon-button danger" onClick={() => deleteWord(word)} aria-label="删除"><Trash2 /></button></>}</span></div>)}
           {!visibleWords.length && <div className="empty-state compact">没有匹配的单词</div>}
         </div>
       </section>}

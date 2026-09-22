@@ -1,7 +1,7 @@
 import type { Card } from 'ts-fsrs'
 
 export type LibraryKind = 'builtin' | 'custom'
-export type StudyMode = 'random' | 'weak' | 'due'
+export type StudyMode = 'daily' | 'random' | 'weak' | 'due'
 export type PlacementMode = 'manual' | 'auto'
 export type RecallRating = 'remembered' | 'fuzzy' | 'forgotten'
 export type StudyStage = 'learn' | 'spell' | 'place' | 'recall' | 'relearn' | 'complete'
@@ -69,6 +69,7 @@ export interface StudySession {
   placementMode: PlacementMode
   targetCount: number
   wordIds: string[]
+  newWordIds?: string[]
   placed: PlacedWord[]
   stage: StudyStage
   currentWordIndex: number
@@ -88,6 +89,42 @@ export interface StudySession {
   status: 'active' | 'completed' | 'abandoned'
 }
 
+export interface MemoryFolder {
+  id: string
+  name: string
+  kind: 'library' | 'custom'
+  libraryId?: string
+  order: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MemoryWordSnapshot {
+  id: string
+  word: string
+  phonetic?: string
+  partOfSpeech?: string
+  meaning: string
+}
+
+export interface MemoryPaper {
+  id: string
+  sourceSessionId: string
+  folderId: string
+  libraryId: string
+  libraryName: string
+  title: string
+  favorite: boolean
+  removed: boolean
+  placed: PlacedWord[]
+  words: MemoryWordSnapshot[]
+  completedAt: string
+  firstRecallRate: number
+  finalMasteryRate: number
+  createdAt: string
+  updatedAt: string
+}
+
 export interface AppSettings {
   accent: 'en-US' | 'en-GB'
   fontScale: number
@@ -97,6 +134,9 @@ export interface AppSettings {
   onboardingDone: boolean
   backupReminderShown: boolean
   lastBackupAt?: string
+  currentLibraryId?: string
+  dailyNewWordTarget: number
+  soundEffects: boolean
 }
 
 export interface SessionSummary {
@@ -118,4 +158,6 @@ export const defaultSettings: AppSettings = {
   showSequence: false,
   onboardingDone: false,
   backupReminderShown: false,
+  dailyNewWordTarget: 30,
+  soundEffects: true,
 }
