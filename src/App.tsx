@@ -1,4 +1,4 @@
-import { Download, FileUp, Info, RefreshCw, ShieldCheck, Upload, Wifi, WifiOff, Volume2, VolumeX } from 'lucide-react'
+import { Bell, Download, FileUp, Info, RefreshCw, ShieldCheck, Upload, Wifi, WifiOff, Volume2, VolumeX } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Onboarding } from './components/Onboarding'
 import { Shell, type ViewName } from './components/Shell'
@@ -7,6 +7,7 @@ import { exportBackup, inspectBackup, restoreBackup } from './lib/backup'
 import { applyAppUpdate, subscribeToAppUpdate } from './lib/pwa'
 import { unlockPronunciationAudio } from './lib/pronunciation'
 import { createStudySession } from './lib/session'
+import { dailyPlan } from './lib/study'
 import { syncMemoryArchive } from './lib/memoryArchive'
 import { HomeView } from './pages/HomeView'
 import { SetupView } from './pages/SetupView'
@@ -91,6 +92,18 @@ function App() {
 
   const currentLibrary = libraries.find((library) => library.id === settings.currentLibraryId) ?? libraries[0]
 
+  useEffect(() => {
+    if (!ready || !settings.reminderEnabled || !currentLibrary || !('Notification' in window) || Notification.permission !== 'granted') return
+    const libraryWords = words.filter((word) => word.libraryId === currentLibrary.id)
+    const libraryIds = new Set(libraryWords.map((word) => word.id))
+    const plan = dailyPlan(libraryWords, new Map(cards.filter((card) => libraryIds.has(card.wordId)).map((card) => [card.wordId, card])), settings.dailyNewWordTarget)
+    const reminderKey = `a4-plan-reminder-${new Date().toISOString().slice(0, 10)}`
+    if (plan.totalCount > 0 && !localStorage.getItem(reminderKey)) {
+      new Notification('A4词忆：今天还有学习计划', { body: `还有 ${plan.totalCount} 个词，完成后即可打卡。` })
+      localStorage.setItem(reminderKey, 'sent')
+    }
+  }, [ready, settings.reminderEnabled, settings.dailyNewWordTarget, currentLibrary?.id, words, cards])
+
   if (initError) return <div className="loading-screen loading-error"><span className="brand-mark">A4</span><h1>词书没有准备好</h1><p>{initError}</p><button className="primary" onClick={initialize}><RefreshCw size={17} />重新加载</button><small>如果正在离线，请先联网完成首次加载。已有本地数据不会被清除。</small></div>
   if (!ready) return <div className="loading-screen"><span className="brand-mark">A4</span><p>正在铺开你的单词纸…</p></div>
 
@@ -101,12 +114,20 @@ function App() {
       {view === 'study' && activeSession && <StudyView initial={activeSession} words={words.filter((word) => word.libraryId === activeSession.libraryId)} settings={settings} onSettings={changeSettings} onFinish={async (session) => { await refresh(); setActiveSession(session); if (!settings.backupReminderShown) setBackupReminder(true) }} onExit={async () => { await refresh(); setView('home') }} />}
       {view === 'libraries' && <Suspense fallback={<div className="loading-section">正在打开词书…</div>}><LibraryView libraries={libraries} words={words} currentLibraryId={currentLibrary?.id} onSelect={async (libraryId) => { await changeSettings({ ...settings, currentLibraryId: libraryId }); setView('home') }} onChanged={refresh} /></Suspense>}
       {view === 'archive' && <Suspense fallback={<div className="loading-section">正在整理记忆纸…</div>}><ArchiveView folders={memoryFolders} papers={memoryPapers} settings={settings} onChanged={refresh} /></Suspense>}
-      {view === 'stats' && <Suspense fallback={<div className="loading-section">正在整理统计…</div>}><StatsView sessions={sessions} cards={cards} words={words} library={currentLibrary} onChangeLibrary={() => setView('libraries')} /></Suspense>}
-      {view === 'settings' && <SettingsView settings={settings} onSettings={changeSettings} onRestored={refresh} />}
+      {view === 'stats' && <Suspense fallback={<div className="loading-section">正在整理统计…</div>}><StatsView sessions={sessions} cards={cards} words={words} library={currentLibrary} onChangeLibrary={() => setView('libraries')} onStartWeak={() => { setSetupInitialMode('weak'); setView('setup') }} onChanged={refresh} /></Suspense>}
+      {view === 'settings' && <><SettingsView settings={settings} onSettings={changeSettings} onRestored={refresh} /><PersonalizationPanel settings={settings} onSettings={changeSettings} /></>}
       {!settings.onboardingDone && <Onboarding onDone={() => changeSettings({ ...settings, onboardingDone: true })} />}
     </Shell>
     {backupReminder && <div className="modal-backdrop"><section className="modal backup-reminder" role="dialog" aria-modal="true"><p className="eyebrow">保护学习记录</p><h2>第一轮已经完成</h2><p>学习记录只保存在当前浏览器。清理浏览器数据或更换手机会导致记录丢失，建议现在导出一份备份。</p><div className="modal-actions"><button className="text-button" onClick={async () => { await changeSettings({ ...settings, backupReminderShown: true }); setBackupReminder(false) }}>稍后</button><button className="primary" onClick={async () => { const lastBackupAt = await exportBackup(); await changeSettings({ ...settings, backupReminderShown: true, lastBackupAt }); setBackupReminder(false) }}><Download size={17} />立即备份</button></div></section></div>}
   </>
+}
+
+function PersonalizationPanel({ settings, onSettings }: { settings: AppSettings; onSettings: (settings: AppSettings) => void }) {
+  async function toggleReminder() {
+    if (!settings.reminderEnabled && 'Notification' in window && Notification.permission === 'default') await Notification.requestPermission()
+    onSettings({ ...settings, reminderEnabled: !settings.reminderEnabled })
+  }
+  return <section className="page-content personalization-panel"><div className="panel settings-panel"><div className="section-heading"><div><p className="eyebrow">个性化学习</p><h2>把 A4 方法调成你的节奏</h2></div></div><div className="settings-grid"><label className="setting-row"><span><strong>每词背诵遍数</strong><small>完成这些遍数后进入拼写</small></span><select value={settings.repetitionsPerWord} onChange={(event) => onSettings({ ...settings, repetitionsPerWord: Number(event.target.value) })}>{[1, 2, 3, 4, 5].map((count) => <option value={count} key={count}>{count} 遍</option>)}</select></label><label className="setting-row"><span><strong>回忆批次</strong><small>每放置多少词进入一次顺序回忆</small></span><select value={settings.recallBatchSize} onChange={(event) => onSettings({ ...settings, recallBatchSize: Number(event.target.value) })}>{[3, 5, 8, 10].map((count) => <option value={count} key={count}>{count} 词</option>)}</select></label><label className="setting-row"><span><strong>自动朗读</strong><small>进入新单词时自动播放一次</small></span><button className={settings.autoSpeak ? 'sound-toggle active' : 'sound-toggle'} onClick={() => onSettings({ ...settings, autoSpeak: !settings.autoSpeak })} aria-pressed={settings.autoSpeak}>{settings.autoSpeak ? <Volume2 /> : <VolumeX />}{settings.autoSpeak ? '已开启' : '已关闭'}</button></label><label className="setting-row"><span><strong>朗读速度</strong><small>浏览器朗读回退时使用</small></span><input type="range" min="0.6" max="1.3" step="0.05" value={settings.speechRate} onChange={(event) => onSettings({ ...settings, speechRate: Number(event.target.value) })} /></label><label className="setting-row"><span><strong>显示信息</strong><small>学习卡片上显示哪些辅助信息</small></span><span className="setting-checks"><label><input type="checkbox" checked={settings.showPhonetic} onChange={(event) => onSettings({ ...settings, showPhonetic: event.target.checked })} />音标</label><label><input type="checkbox" checked={settings.showPartOfSpeech} onChange={(event) => onSettings({ ...settings, showPartOfSpeech: event.target.checked })} />词性</label><label><input type="checkbox" checked={settings.showMeaning} onChange={(event) => onSettings({ ...settings, showMeaning: event.target.checked })} />释义</label></span></label><label className="setting-row"><span><strong>纸面样式</strong><small>应用到纸面背景</small></span><select value={settings.paperTheme} onChange={(event) => onSettings({ ...settings, paperTheme: event.target.value as AppSettings['paperTheme'] })}><option value="plain">素纸</option><option value="grid">方格</option><option value="ruled">横线</option></select></label><label className="setting-row"><span><strong>未完成计划提醒</strong><small>浏览器支持时请求通知权限；页面打开时显示提醒</small></span><button className={settings.reminderEnabled ? 'sound-toggle active' : 'sound-toggle'} onClick={() => void toggleReminder()}><Bell />{settings.reminderEnabled ? '已开启' : '已关闭'}</button></label><label className="setting-row"><span><strong>提醒时间</strong><small>仅保存为本地偏好，系统通知需浏览器支持</small></span><input type="time" value={settings.reminderTime} onChange={(event) => onSettings({ ...settings, reminderTime: event.target.value })} /></label></div></div></section>
 }
 
 function SettingsView({ settings, onSettings, onRestored }: { settings: AppSettings; onSettings: (settings: AppSettings) => void; onRestored: () => Promise<void> }) {

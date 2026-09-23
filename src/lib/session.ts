@@ -35,6 +35,7 @@ export async function createStudySession(options: {
     events: [],
     metrics: { spellingErrors: 0, answerReveals: 0, spellingSkips: 0, positionHints: 0, sequenceAids: 0 },
     spellingForgottenWordIds: [],
+    spellingErrorWordIds: [],
     startedAt: now,
     updatedAt: now,
     status: 'active',
@@ -53,6 +54,11 @@ export async function finishSession(session: StudySession) {
       const stored = await db.cards.get(wordId)
       const scheduled = scheduleCard(stored, aggregateRating(events, completed.spellingForgottenWordIds.includes(wordId)))
       scheduled.wordId = wordId
+      scheduled.forgetCount = (stored?.forgetCount ?? 0) + events.filter((event) => event.rating === 'forgotten').length
+      scheduled.fuzzyCount = (stored?.fuzzyCount ?? 0) + events.filter((event) => event.rating === 'fuzzy').length
+      scheduled.spellingErrorCount = (stored?.spellingErrorCount ?? 0) + (completed.spellingErrorWordIds?.filter((id) => id === wordId).length ?? 0) + (completed.spellingForgottenWordIds.includes(wordId) ? 1 : 0)
+      scheduled.important = stored?.important ?? false
+      scheduled.confusing = stored?.confusing ?? false
       await db.cards.put(scheduled)
     }
   })

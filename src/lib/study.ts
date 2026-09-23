@@ -131,7 +131,7 @@ export function pickWords(words: WordEntry[], cards: Map<string, StoredCard>, co
   const unseen = words.filter((word) => !cards.has(word.id))
   const weak = words.filter((word) => {
     const card = cards.get(word.id)
-    return card && new Date(card.card.due).getTime() > now && (card.card.difficulty ?? 0) >= 7
+    return card && new Date(card.card.due).getTime() > now && ((card.card.difficulty ?? 0) >= 7 || (card.forgetCount ?? 0) > 0 || (card.fuzzyCount ?? 0) > 0 || (card.spellingErrorCount ?? 0) > 0 || card.important || card.confusing)
   })
   const learned = words.filter((word) => {
     const card = cards.get(word.id)

@@ -1,8 +1,9 @@
-import { AlertTriangle, BookOpen, CalendarDays, CheckCircle2, Search, Target, TrendingUp, X } from 'lucide-react'
+import { AlertTriangle, BookOpen, CalendarDays, CheckCircle2, Flag, Search, Target, TrendingUp, X } from 'lucide-react'
 import { useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { classifyCard, summaryFor } from '../lib/study'
 import { formatPartOfSpeech } from '../components/MeaningDisplay'
+import { db } from '../db'
 import type { StoredCard, StudySession, WordEntry, WordLibrary } from '../types'
 
 interface StatsViewProps {
@@ -11,6 +12,8 @@ interface StatsViewProps {
   words: WordEntry[]
   library?: WordLibrary
   onChangeLibrary: () => void
+  onStartWeak: () => void
+  onChanged?: () => Promise<void>
 }
 
 function dayKey(value: Date | string) {
@@ -22,9 +25,10 @@ function percent(value: number) {
   return `${Math.round(value * 100)}%`
 }
 
-export function StatsView({ sessions, cards, words, library, onChangeLibrary }: StatsViewProps) {
+export function StatsView({ sessions, cards, words, library, onChangeLibrary, onStartWeak, onChanged }: StatsViewProps) {
   const [selectedWord, setSelectedWord] = useState<WordEntry>()
   const [wordSearch, setWordSearch] = useState('')
+  const [weakFilter, setWeakFilter] = useState<'all' | 'spelling' | 'forgotten' | 'fuzzy' | 'flagged'>('all')
   const libraryWords = words.filter((word) => word.libraryId === library?.id)
   const wordIds = new Set(libraryWords.map((word) => word.id))
   const libraryCards = cards.filter((card) => wordIds.has(card.wordId))
@@ -34,12 +38,29 @@ export function StatsView({ sessions, cards, words, library, onChangeLibrary }: 
   const summaries = completed.map((session) => ({ session, summary: summaryFor(session) }))
   const learnedWords = libraryWords.filter((word) => cardMap.has(word.id))
   const dueCount = learnedWords.filter((word) => new Date(cardMap.get(word.id)!.card.due) <= new Date()).length
-  const allWeakWords = learnedWords.filter((word) => cardMap.get(word.id)!.card.difficulty >= 7).sort((a, b) => {
+  const allWeakWords = learnedWords.filter((word) => {
+    const card = cardMap.get(word.id)!
+    return card.card.difficulty >= 7 || (card.forgetCount ?? 0) > 0 || (card.fuzzyCount ?? 0) > 0 || (card.spellingErrorCount ?? 0) > 0 || card.important || card.confusing
+  }).sort((a, b) => {
     const aCard = cardMap.get(a.id)!
     const bCard = cardMap.get(b.id)!
     return new Date(aCard.card.due).getTime() - new Date(bCard.card.due).getTime() || bCard.card.difficulty - aCard.card.difficulty
   })
-  const weakWords = allWeakWords.slice(0, 12)
+  const weakWords = allWeakWords.filter((word) => {
+    const card = cardMap.get(word.id)!
+    if (weakFilter === 'spelling') return (card.spellingErrorCount ?? 0) > 0
+    if (weakFilter === 'forgotten') return (card.forgetCount ?? 0) > 0
+    if (weakFilter === 'fuzzy') return (card.fuzzyCount ?? 0) > 0
+    if (weakFilter === 'flagged') return Boolean(card.important || card.confusing)
+    return true
+  }).slice(0, 12)
+
+  async function toggleFlag(wordId: string, key: 'important' | 'confusing') {
+    const card = cardMap.get(wordId)
+    if (!card) return
+    await db.cards.update(wordId, { [key]: !card[key] })
+    await onChanged?.()
+  }
 
   const totalRecallEvents = completed.reduce((sum, session) => sum + session.events.length, 0)
   const positionHints = completed.reduce((sum, session) => sum + session.metrics.positionHints, 0)
@@ -98,7 +119,7 @@ export function StatsView({ sessions, cards, words, library, onChangeLibrary }: 
     </div>
 
     <div className="stats-detail-grid">
-      <section className="panel"><div className="section-heading"><div><h2>薄弱词</h2><p>优先显示到期和高难度单词</p></div></div><div className="weak-word-grid">{weakWords.map((word) => <button key={word.id} onClick={() => setSelectedWord(word)}><strong>{word.word}</strong><span>{word.meaning}</span><small>{classifyCard(cardMap.get(word.id))} · {new Date(cardMap.get(word.id)!.card.due).toLocaleDateString('zh-CN')}</small></button>)}{!weakWords.length && <div className="empty-state compact">暂无薄弱词</div>}</div></section>
+      <section className="panel weak-zone"><div className="section-heading"><div><h2>薄弱词专区</h2><p>按错误记录和个人标记筛选，错得多的词会优先复习。</p></div><button className="primary" disabled={!allWeakWords.length} onClick={onStartWeak}><Target size={16} />开始薄弱词 A4 复习</button></div><div className="weak-filters">{([['all', '全部'], ['spelling', '拼写错误'], ['forgotten', '忘记'], ['fuzzy', '模糊'], ['flagged', '重点/易混淆']] as const).map(([value, label]) => <button key={value} className={weakFilter === value ? 'active' : ''} onClick={() => setWeakFilter(value)}>{label}</button>)}</div><div className="weak-word-grid">{weakWords.map((word) => { const card = cardMap.get(word.id)!; return <div className="weak-word-item" key={word.id}><button className="weak-word-main" onClick={() => setSelectedWord(word)}><strong>{word.word}</strong><span>{word.meaning}</span><small>{classifyCard(card)} · 忘记 {card.forgetCount ?? 0} · 模糊 {card.fuzzyCount ?? 0} · 拼写 {card.spellingErrorCount ?? 0}</small></button><div className="weak-word-flags"><button className={card.important ? 'flag active' : 'flag'} title="重点词" aria-label="标记重点词" onClick={() => void toggleFlag(word.id, 'important')}><Flag size={14} /></button><button className={card.confusing ? 'flag active' : 'flag'} title="易混淆词" aria-label="标记易混淆词" onClick={() => void toggleFlag(word.id, 'confusing')}><AlertTriangle size={14} /></button></div></div> })}{!weakWords.length && <div className="empty-state compact">暂无符合条件的薄弱词</div>}</div></section>
       <section className="panel history-panel"><div className="section-heading"><div><h2>最近学习</h2><p>当前词书最近完成的 8 次任务</p></div></div>{summaries.length ? <div className="history-list">{summaries.slice(-8).reverse().map(({ session, summary }) => <div className="history-row compact-history" key={session.id}><span><strong>{new Date(session.completedAt!).toLocaleDateString('zh-CN')}</strong><small>{summary.totalWords} 词 · {summary.durationMinutes} 分钟</small></span><span>首次 {percent(summary.firstRecallRate)}</span><span>掌握 {percent(summary.finalMasteryRate)}</span></div>)}</div> : <div className="empty-state compact">暂无完成记录</div>}</section>
     </div>
 

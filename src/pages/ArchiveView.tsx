@@ -1,4 +1,4 @@
-import { Archive, BookOpen, CalendarDays, FileText, Folder, FolderInput, FolderPlus, Heart, Pencil, Trash2, Volume2, X } from 'lucide-react'
+import { Archive, BookOpen, CalendarDays, Download, FileText, Folder, FolderInput, FolderPlus, Heart, Pencil, Printer, Search, Trash2, Volume2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { MeaningDisplay } from '../components/MeaningDisplay'
 import { PaperCanvas } from '../components/PaperCanvas'
@@ -37,13 +37,14 @@ export function ArchiveView({ folders, papers, settings, onChanged }: ArchiveVie
   const [openPaper, setOpenPaper] = useState<MemoryPaper>()
   const [currentPage, setCurrentPage] = useState(0)
   const [selectedWord, setSelectedWord] = useState<MemoryWordSnapshot>()
+  const [paperSearch, setPaperSearch] = useState('')
   const visiblePapers = useMemo(() => papers.filter((paper) => !paper.removed), [papers])
   const sortedFolders = useMemo(() => [...folders].sort((a, b) => a.kind.localeCompare(b.kind) || a.order - b.order || a.name.localeCompare(b.name, 'zh-CN')), [folders])
   const shownPapers = useMemo(() => visiblePapers.filter((paper) => {
     if (folderFilter === 'all') return true
     if (folderFilter === 'favorites') return paper.favorite
     return paper.folderId === folderFilter
-  }).sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.completedAt.localeCompare(a.completedAt)), [folderFilter, visiblePapers])
+  }).filter((paper) => !paperSearch || `${paper.title} ${paper.libraryName} ${formatDay(paper.completedAt)}`.toLowerCase().includes(paperSearch.toLowerCase())).sort((a, b) => Number(b.favorite) - Number(a.favorite) || b.completedAt.localeCompare(a.completedAt)), [folderFilter, paperSearch, visiblePapers])
   const wordsById = useMemo(() => new Map((openPaper?.words ?? []).map((word) => [word.id, word])), [openPaper])
 
   useEffect(() => () => {
@@ -137,6 +138,20 @@ export function ArchiveView({ folders, papers, settings, onChanged }: ArchiveVie
     await onChanged()
   }
 
+  function exportPaper(paper: MemoryPaper) {
+    const words = paper.words.map((word) => {
+      const placed = paper.placed.find((item) => item.wordId === word.id)
+      if (!placed) return ''
+      return `<text x="${placed.x}" y="${placed.y + placed.fontSize}" font-size="${placed.fontSize}" fill="#24342e">${word.word.replace(/[&<>"']/g, (value) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[value] ?? value))}</text>`
+    }).join('')
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1414" viewBox="0 0 1000 1414"><rect width="100%" height="100%" fill="#fffef9"/>${words}</svg>`
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }))
+    link.download = `${paper.title || 'A4记忆纸'}.svg`
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 0)
+  }
+
   const selectedFolderName = folderFilter === 'all' ? '全部记忆纸' : folderFilter === 'favorites' ? '我的收藏' : folders.find((folder) => folder.id === folderFilter)?.name ?? '记忆纸'
 
   return <div className="page-content archive-page">
@@ -156,7 +171,7 @@ export function ArchiveView({ folders, papers, settings, onChanged }: ArchiveVie
         </div>)}
       </aside>
       <section className="archive-content">
-        <div className="archive-section-heading"><div><h2>{selectedFolderName}</h2><p>{shownPapers.length ? `共 ${shownPapers.length} 张，收藏的纸会排在前面` : '这里还没有记忆纸'}</p></div></div>
+        <div className="archive-section-heading"><div><h2>{selectedFolderName}</h2><p>{shownPapers.length ? `共 ${shownPapers.length} 张，收藏的纸会排在前面` : '这里还没有记忆纸'}</p></div><label className="search-box archive-search"><Search size={16} /><input value={paperSearch} onChange={(event) => setPaperSearch(event.target.value)} placeholder="搜索词书、日期或名称" /></label></div>
         {shownPapers.length ? <div className="memory-paper-grid">{shownPapers.map((paper) => {
           const firstPageWords = paper.placed.filter((item) => item.page === 0)
           const paperWords = new Map(paper.words.map((word) => [word.id, word]))
@@ -180,7 +195,7 @@ export function ArchiveView({ folders, papers, settings, onChanged }: ArchiveVie
       </section>
     </div>
     {openPaper && <div className="modal-backdrop archive-viewer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpenPaper(undefined) }}><section className="archive-viewer" role="dialog" aria-modal="true" aria-label={openPaper.title}>
-      <header className="archive-viewer-header"><div><small>{openPaper.libraryName}</small><h2>{openPaper.title}</h2></div><button className="icon-button" onClick={() => setOpenPaper(undefined)} aria-label="关闭记忆纸"><X /></button></header>
+       <header className="archive-viewer-header"><div><small>{openPaper.libraryName}</small><h2>{openPaper.title}</h2></div><div className="archive-viewer-actions"><button className="tool-button" onClick={() => exportPaper(openPaper)}><Download size={16} />导出图片</button><button className="tool-button" onClick={() => window.print()}><Printer size={16} />打印</button><button className="icon-button" onClick={() => setOpenPaper(undefined)} aria-label="关闭记忆纸"><X /></button></div></header>
       <div className={selectedWord ? 'archive-viewer-body has-word-card' : 'archive-viewer-body'}>
         <PaperCanvas placed={openPaper.placed} words={new Map(openPaper.words.map((word) => [word.id, { word: word.word }]))} currentPage={currentPage} onPageChange={(page) => { setCurrentPage(page); setSelectedWord(undefined) }} onWordClick={inspectWord} onPreview={() => undefined} showSequence highlightedId={selectedWord?.id} onSpeak={speak} mobileExpanded onMobileToggle={() => undefined} showMobileToggle={false} />
         {selectedWord && <aside className="archive-word-card"><button className="icon-button" onClick={() => setSelectedWord(undefined)} aria-label="关闭单词卡片"><X /></button><button className="archive-word-title" onClick={() => speak(selectedWord.word)}><span>{selectedWord.word}</span><Volume2 /></button><p className="phonetic">{selectedWord.phonetic || '暂无音标'}</p><MeaningDisplay meaning={selectedWord.meaning} partOfSpeech={selectedWord.partOfSpeech} /></aside>}

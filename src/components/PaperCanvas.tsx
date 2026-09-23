@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, FilePlus2, LocateFixed, Maximize2, Minimize2, Minus, Plus, Volume2 } from 'lucide-react'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
-import type { PlacedWord } from '../types'
+import type { PlacedWord, AppSettings } from '../types'
 import { isValidPlacement, PAGE_HEIGHT, PAGE_WIDTH } from '../lib/study'
 
 interface PaperCanvasProps {
@@ -22,6 +22,7 @@ interface PaperCanvasProps {
   onMobileToggle: () => void
   showMobileToggle?: boolean
   mobileGuide?: ReactNode
+  paperTheme?: AppSettings['paperTheme']
 }
 
 export function PaperCanvas(props: PaperCanvasProps) {
@@ -105,7 +106,7 @@ export function PaperCanvas(props: PaperCanvasProps) {
       {props.mobileGuide && <div className="mobile-paper-guide">{props.mobileGuide}</div>}
       <div ref={scrollRef} className="paper-scroll" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onClick={() => { if (props.showMobileToggle !== false && !props.mobileExpanded && !props.placing) props.onMobileToggle() }}>
         <div className="paper-zoom" style={{ width: `${zoom * 100}%` }}>
-          <div ref={ref} className={props.placing ? 'a4-paper placing' : 'a4-paper'} onClick={selectPoint}>
+          <div ref={ref} className={`${props.placing ? 'a4-paper placing' : 'a4-paper'} paper-theme-${props.paperTheme ?? 'plain'}`} onClick={selectPoint}>
             {pageWords.map((item) => {
               const word = props.words.get(item.wordId)?.word ?? ''
               return (

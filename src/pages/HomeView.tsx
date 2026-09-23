@@ -1,23 +1,7 @@
 import { ArrowRight, BookOpen, CalendarDays, CheckCircle2, Clock3, Flame, Play, RefreshCw, Sparkles, Target } from 'lucide-react'
 import { dailyPlan } from '../lib/study'
+import { completedDaySet, dayKey, monthCalendar, nextSevenDaysDue, studyStreak } from '../lib/checkin'
 import type { AppSettings, StoredCard, StudySession, WordEntry, WordLibrary } from '../types'
-
-function localDay(value: string | Date) {
-  const date = new Date(value)
-  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
-}
-
-function studyStreak(sessions: StudySession[]) {
-  const days = new Set(sessions.filter((session) => session.status === 'completed' && session.completedAt).map((session) => localDay(session.completedAt!)))
-  const cursor = new Date()
-  if (!days.has(localDay(cursor))) cursor.setDate(cursor.getDate() - 1)
-  let streak = 0
-  while (days.has(localDay(cursor))) {
-    streak += 1
-    cursor.setDate(cursor.getDate() - 1)
-  }
-  return streak
-}
 
 export function HomeView(props: {
   library?: WordLibrary
@@ -39,8 +23,8 @@ export function HomeView(props: {
   const libraryCards = props.cards.filter((card) => wordIds.has(card.wordId))
   const cardMap = new Map(libraryCards.map((card) => [card.wordId, card]))
   const completed = props.sessions.filter((session) => session.status === 'completed' && session.completedAt)
-  const today = localDay(new Date())
-  const todaySessions = completed.filter((session) => session.libraryId === library?.id && localDay(session.completedAt!) === today)
+  const today = dayKey(new Date())
+  const todaySessions = completed.filter((session) => session.libraryId === library?.id && dayKey(session.completedAt!) === today)
   const todayNewIds = new Set(todaySessions.flatMap((session) => session.newWordIds ?? []))
   const todayWordIds = new Set(todaySessions.flatMap((session) => session.wordIds))
   const remainingNewTarget = Math.max(0, props.settings.dailyNewWordTarget - todayNewIds.size)
@@ -48,9 +32,12 @@ export function HomeView(props: {
   const totalToday = todayWordIds.size + plan.totalCount
   const learned = libraryWords.filter((word) => cardMap.has(word.id)).length
   const progress = library?.wordCount ? Math.round(learned / library.wordCount * 100) : 0
-  const streak = studyStreak(completed)
+  const streak = studyStreak(completed, library?.id)
   const weekStart = new Date(); weekStart.setHours(0, 0, 0, 0); weekStart.setDate(weekStart.getDate() - 6)
-  const weekDays = new Set(completed.filter((session) => new Date(session.completedAt!).getTime() >= weekStart.getTime()).map((session) => localDay(session.completedAt!))).size
+  const weekDays = new Set(completed.filter((session) => session.libraryId === library?.id && new Date(session.completedAt!).getTime() >= weekStart.getTime()).map((session) => dayKey(session.completedAt!))).size
+  const activeDays = completedDaySet(completed, library?.id)
+  const calendar = monthCalendar(new Date().getFullYear(), new Date().getMonth(), activeDays)
+  const nextReviews = nextSevenDaysDue(libraryCards)
   const estimatedMinutes = Math.max(1, Math.ceil(plan.totalCount * .6))
 
   return <div className="page-content daily-home">
@@ -87,6 +74,10 @@ export function HomeView(props: {
         <div><CheckCircle2 /><span><small>今日完成</small><strong>{todayWordIds.size} / {Math.max(todayWordIds.size, totalToday)}</strong></span></div>
         <div><CalendarDays /><span><small>本周完成</small><strong>{weekDays} 天</strong></span></div>
       </section>
+    </div>
+    <div className="home-insights-grid">
+      <section className="panel checkin-calendar"><div className="section-heading compact-heading"><div><span className="section-kicker"><CalendarDays size={16} />学习打卡</span><h2>{new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })}</h2></div><span className="calendar-caption">已学习 {activeDays.size} 天</span></div><div className="calendar-weekdays">{['一', '二', '三', '四', '五', '六', '日'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{calendar.map((item, index) => item ? <span key={item.key} className={item.completed ? 'calendar-day completed' : dayKey(new Date()) === item.key ? 'calendar-day today' : 'calendar-day'}>{new Date(item.date).getDate()}</span> : <i key={`empty-${index}`} />)}</div></section>
+      <section className="panel upcoming-reviews"><div className="section-heading compact-heading"><div><span className="section-kicker"><RefreshCw size={16} />智能复习</span><h2>未来 7 天复习量</h2></div></div><div className="review-bars">{nextReviews.map((item) => <div key={item.key}><span>{item.date.toLocaleDateString('zh-CN', { weekday: 'short' })}</span><div><i style={{ height: `${Math.max(8, Math.min(100, item.count * 12))}%` }} /></div><strong>{item.count}</strong></div>)}</div><p className="field-help">到期词会优先进入今日计划；错过的复习会保留到下一次学习。</p></section>
     </div>
   </div>
 }

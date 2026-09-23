@@ -62,7 +62,7 @@ function initialPanelPosition(): PanelPosition {
   return dockedPanelPosition('right')
 }
 
-function speak(text: string, accent: AppSettings['accent'], onFailure?: () => void) {
+function speak(text: string, accent: AppSettings['accent'], rate = .82, onFailure?: () => void) {
   if (!('speechSynthesis' in window)) {
     onFailure?.()
     return false
@@ -74,7 +74,7 @@ function speak(text: string, accent: AppSettings['accent'], onFailure?: () => vo
   const voices = synthesis.getVoices()
   utterance.voice = voices.find((voice) => voice.lang === accent) ?? voices.find((voice) => voice.lang.startsWith('en')) ?? null
   utterance.lang = accent
-  utterance.rate = .82
+  utterance.rate = rate
   utterance.volume = 1
   utterance.onerror = () => onFailure?.()
   synthesis.speak(utterance)
@@ -138,6 +138,22 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   }, [])
 
   useEffect(() => {
+    function handleShortcut(event: KeyboardEvent) {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return
+      if (event.key.toLowerCase() === 'r') {
+        const word = session.stage === 'learn' ? currentWord : session.stage === 'relearn' ? relearnWord : session.stage === 'recall' ? recallWord : undefined
+        if (word) { event.preventDefault(); playWord(word.word) }
+      }
+      if (event.code === 'Space' && (session.stage === 'learn' || session.stage === 'relearn')) { event.preventDefault(); void markRepetition() }
+      if (session.stage === 'recall' && session.selectedRecallWordId && session.revealedMeaning && ['1', '2', '3'].includes(event.key)) {
+        event.preventDefault(); void rateRecall(event.key === '1' ? 'remembered' : event.key === '2' ? 'fuzzy' : 'forgotten')
+      }
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [session.stage, session.selectedRecallWordId, session.revealedMeaning, currentWord, relearnWord, recallWord, settings.accent])
+
+  useEffect(() => {
     function movePanel(event: PointerEvent) {
       if (!dragOffset.current) return
       const { width, height } = panelSize()
@@ -182,7 +198,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
 
   function playWord(word: string) {
     playOnlinePronunciation(word, settings.accent, () => {
-      speak(word, settings.accent, () => setMessage('在线发音和浏览器朗读都不可用，请检查网络或系统语音设置'))
+      speak(word, settings.accent, settings.speechRate, () => setMessage('在线发音和浏览器朗读都不可用，请检查网络或系统语音设置'))
     })
   }
 
@@ -204,8 +220,8 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
       : `relearn:${session.recallRound}:${session.recallIndex}:${word.id}`
     if (autoSpokenKeyRef.current === key) return
     autoSpokenKeyRef.current = key
-    playWord(word.word)
-  }, [currentWord, relearnWord, session.currentWordIndex, session.recallIndex, session.recallRound, session.stage, settings.accent])
+    if (settings.autoSpeak) playWord(word.word)
+  }, [currentWord, relearnWord, session.currentWordIndex, session.recallIndex, session.recallRound, session.stage, settings.accent, settings.autoSpeak, settings.speechRate])
 
   async function update(next: StudySession) {
     const value = { ...next, updatedAt: new Date().toISOString() }
@@ -246,12 +262,13 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   async function markRepetition() {
     playFeedbackSound('complete', settings.soundEffects)
     const repetitions = session.repetitions + 1
-    if (session.stage === 'relearn' && repetitions >= 3) {
+    const repetitionTarget = Math.max(1, settings.repetitionsPerWord ?? 3)
+    if (session.stage === 'relearn' && repetitions >= repetitionTarget) {
       await endRecallOrContinue({ ...session, repetitions: 0 })
       return
     }
-    if (session.stage === 'learn' && repetitions >= 3) {
-      await update({ ...session, repetitions: 3, stage: 'spell' })
+    if (session.stage === 'learn' && repetitions >= repetitionTarget) {
+      await update({ ...session, repetitions: repetitionTarget, stage: 'spell' })
       setSpelling('')
       return
     }
@@ -264,7 +281,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     if (normalizeWord(spelling) !== currentWord.normalizedWord) {
       playFeedbackSound('error', settings.soundEffects)
       setMessage('拼写不正确，请再试一次')
-      await update({ ...session, metrics: { ...session.metrics, spellingErrors: session.metrics.spellingErrors + 1 } })
+      await update({ ...session, metrics: { ...session.metrics, spellingErrors: session.metrics.spellingErrors + 1 }, spellingErrorWordIds: [...(session.spellingErrorWordIds ?? []), currentWord.id] })
       return
     }
     playFeedbackSound('correct', settings.soundEffects)
@@ -282,7 +299,8 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     if (!currentWord) return
     playFeedbackSound(skip ? 'error' : 'complete', settings.soundEffects)
     setSpelling(currentWord.word)
-    setMessage(skip ? '已记为忘记。重新背3遍后，再正确拼写。' : '重新背3遍后，再正确拼写。')
+    const repetitionTarget = Math.max(1, settings.repetitionsPerWord ?? 3)
+    setMessage(skip ? `已记为忘记。重新背${repetitionTarget}遍后，再正确拼写。` : `重新背${repetitionTarget}遍后，再正确拼写。`)
     await update({
       ...session,
       stage: 'learn',
@@ -302,7 +320,8 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     if (!currentWord) return
     playFeedbackSound('place', settings.soundEffects)
     const placed: PlacedWord[] = [...base.placed, { ...placement, wordId: currentWord.id, order: base.placed.length + 1 }]
-    const shouldRecall = placed.length % 3 === 0 || placed.length === base.wordIds.length
+    const recallBatchSize = Math.max(1, settings.recallBatchSize ?? 3)
+    const shouldRecall = placed.length % recallBatchSize === 0 || placed.length === base.wordIds.length
     setCurrentPage(placement.page)
     if (isMobileViewport) setMobileSurface(shouldRecall ? 'paper' : 'card')
     setMessage(shouldRecall ? `已写入${placed.length}个单词，开始累积回忆` : '已写入纸面，继续下一个单词')
@@ -423,6 +442,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
           onSpeak={playWord}
           canHint={session.stage === 'recall' && !session.selectedRecallWordId}
           onHint={hintPosition}
+          paperTheme={settings.paperTheme}
           mobileExpanded={mobileSurface === 'paper'}
           mobileGuide={isMobileViewport && session.stage === 'recall' && !session.selectedRecallWordId ? <>
             <div className="mobile-paper-guide-heading"><RotateCcw size={16} /><strong>第{session.recallRound}轮累积回忆</strong><span>顺序 {session.recallIndex + 1} / {session.recallLimit}</span></div>
@@ -464,12 +484,12 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
           const word = session.stage === 'relearn' ? relearnWord! : currentWord!
           return <div className="word-study">
             <button className="word-title" onClick={() => playWord(word.word)}>{word.word}<Volume2 size={19} /></button>
-            <p className="phonetic">{word.phonetic || '暂无音标'}</p>
-            <MeaningDisplay meaning={word.meaning} partOfSpeech={word.partOfSpeech} />
+            {settings.showPhonetic && <p className="phonetic">{word.phonetic || '暂无音标'}</p>}
+            {settings.showMeaning && <MeaningDisplay meaning={word.meaning} partOfSpeech={settings.showPartOfSpeech ? word.partOfSpeech : undefined} />}
             <div className="repetition-dots" aria-label={`已完成${session.repetitions}遍`}>
-              {[1, 2, 3].map((item) => <i key={item} className={item <= session.repetitions ? 'done' : ''} />)}
+              {Array.from({ length: Math.max(1, settings.repetitionsPerWord ?? 3) }, (_, index) => index + 1).map((item) => <i key={item} className={item <= session.repetitions ? 'done' : ''} />)}
             </div>
-            <button className="primary wide" onClick={markRepetition}>完成第{Math.min(3, session.repetitions + 1)}遍</button>
+            <button className="primary wide" onClick={markRepetition}>完成第{Math.min(Math.max(1, settings.repetitionsPerWord ?? 3), session.repetitions + 1)}遍</button>
           </div>
         })()}
 
@@ -503,8 +523,8 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
             <button className="primary wide" onClick={revealRecallMeaning}>显示释义</button>
           </> : <>
             <h2>{recallWord.word}</h2>
-            <p className="phonetic">{recallWord.phonetic || '暂无音标'}</p>
-            <MeaningDisplay meaning={recallWord.meaning} partOfSpeech={recallWord.partOfSpeech} compact />
+            {settings.showPhonetic && <p className="phonetic">{recallWord.phonetic || '暂无音标'}</p>}
+            {settings.showMeaning && <MeaningDisplay meaning={recallWord.meaning} partOfSpeech={settings.showPartOfSpeech ? recallWord.partOfSpeech : undefined} compact />}
             <div className="rating-actions">
               <button className="remember" onClick={() => rateRecall('remembered')}>记得</button>
               <button className="fuzzy" onClick={() => rateRecall('fuzzy')}>模糊</button>

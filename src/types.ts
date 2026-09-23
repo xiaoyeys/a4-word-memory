@@ -32,6 +32,11 @@ export interface StoredCard {
   wordId: string
   card: Card
   lastStudiedAt?: string
+  forgetCount?: number
+  fuzzyCount?: number
+  spellingErrorCount?: number
+  important?: boolean
+  confusing?: boolean
 }
 
 export interface PlacedWord {
@@ -83,6 +88,7 @@ export interface StudySession {
   events: RecallEvent[]
   metrics: SessionMetrics
   spellingForgottenWordIds: string[]
+  spellingErrorWordIds?: string[]
   startedAt: string
   updatedAt: string
   completedAt?: string
@@ -137,6 +143,16 @@ export interface AppSettings {
   currentLibraryId?: string
   dailyNewWordTarget: number
   soundEffects: boolean
+  repetitionsPerWord: number
+  recallBatchSize: number
+  paperTheme: 'plain' | 'grid' | 'ruled'
+  showPhonetic: boolean
+  showPartOfSpeech: boolean
+  showMeaning: boolean
+  autoSpeak: boolean
+  speechRate: number
+  reminderEnabled: boolean
+  reminderTime: string
 }
 
 export interface SessionSummary {
@@ -160,4 +176,14 @@ export const defaultSettings: AppSettings = {
   backupReminderShown: false,
   dailyNewWordTarget: 30,
   soundEffects: true,
+  repetitionsPerWord: 3,
+  recallBatchSize: 3,
+  paperTheme: 'plain',
+  showPhonetic: true,
+  showPartOfSpeech: true,
+  showMeaning: true,
+  autoSpeak: true,
+  speechRate: 1,
+  reminderEnabled: false,
+  reminderTime: '20:00',
 }
