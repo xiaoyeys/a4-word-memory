@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, FilePlus2, LocateFixed, Maximize2, Minimize2, Minus, Plus, Volume2 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { PlacedWord } from '../types'
 import { isValidPlacement, PAGE_HEIGHT, PAGE_WIDTH } from '../lib/study'
 
@@ -21,6 +21,7 @@ interface PaperCanvasProps {
   mobileExpanded: boolean
   onMobileToggle: () => void
   showMobileToggle?: boolean
+  mobileGuide?: ReactNode
 }
 
 export function PaperCanvas(props: PaperCanvasProps) {
@@ -85,7 +86,7 @@ export function PaperCanvas(props: PaperCanvasProps) {
   }
 
   return (
-    <section className={`paper-workspace${props.mobileExpanded ? ' mobile-paper-expanded' : ''}`} aria-label="A4单词纸">
+    <section className={`paper-workspace${props.mobileExpanded ? ' mobile-paper-expanded' : ''}${props.mobileGuide ? ' has-mobile-guide' : ''}`} aria-label="A4单词纸">
       <div className="paper-toolbar">
         <div className="pager">
           <button className="icon-button" disabled={props.currentPage === 0} onClick={() => props.onPageChange(props.currentPage - 1)} aria-label="上一页"><ChevronLeft /></button>
@@ -101,6 +102,7 @@ export function PaperCanvas(props: PaperCanvasProps) {
           <button className="icon-button" onClick={() => setZoom(Math.min(1.7, zoom + .12))} aria-label="放大纸张"><Plus /></button>
         </div>
       </div>
+      {props.mobileGuide && <div className="mobile-paper-guide">{props.mobileGuide}</div>}
       <div ref={scrollRef} className="paper-scroll" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onClick={() => { if (props.showMobileToggle !== false && !props.mobileExpanded && !props.placing) props.onMobileToggle() }}>
         <div className="paper-zoom" style={{ width: `${zoom * 100}%` }}>
           <div ref={ref} className={props.placing ? 'a4-paper placing' : 'a4-paper'} onClick={selectPoint}>
