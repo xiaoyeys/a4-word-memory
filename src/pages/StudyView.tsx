@@ -1,4 +1,4 @@
-import { ArrowLeft, BookOpenCheck, Check, Eye, EyeOff, GripHorizontal, Keyboard, MapPin, PanelBottom, PanelLeft, PanelRight, PanelTop, RotateCcw, Volume2, X } from 'lucide-react'
+import { ArrowLeft, BookOpenCheck, Check, Eye, EyeOff, GripHorizontal, Keyboard, MapPin, Maximize2, PanelBottom, PanelLeft, PanelRight, PanelTop, RotateCcw, Volume2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { db } from '../db'
 import { estimateWordBox, findRandomPlacement, normalizeWord, summaryFor } from '../lib/study'
@@ -29,6 +29,7 @@ interface PanelPosition {
 const PANEL_WIDTH = 380
 const PANEL_HEIGHT = 650
 const PANEL_STORAGE_KEY = 'a4-word-memory-panel-position'
+const PAPER_STORAGE_KEY = 'a4-word-memory-mobile-paper-position'
 
 function panelSize(dock: PanelDock = 'free') {
   if (dock === 'top' || dock === 'bottom') {
@@ -62,6 +63,16 @@ function initialPanelPosition(): PanelPosition {
   return dockedPanelPosition('right')
 }
 
+function initialMobilePaperPosition() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PAPER_STORAGE_KEY) ?? '') as { x: number; y: number }
+    if (Number.isFinite(stored.x) && Number.isFinite(stored.y)) return stored
+  } catch {
+    // Use the default corner when no valid preference has been stored.
+  }
+  return { x: Math.max(8, window.innerWidth - 146), y: Math.max(90, window.innerHeight - 300) }
+}
+
 function speak(text: string, accent: AppSettings['accent'], onFailure?: () => void) {
   if (!('speechSynthesis' in window)) {
     onFailure?.()
@@ -88,10 +99,14 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   const [currentPage, setCurrentPage] = useState(initial.preview?.page ?? Math.max(0, ...initial.placed.map((item) => item.page)))
   const [highlightedId, setHighlightedId] = useState<string>()
   const [panelPosition, setPanelPosition] = useState<PanelPosition>(initialPanelPosition)
-  const [mobileSurface, setMobileSurface] = useState<'card' | 'paper'>(initial.stage === 'recall' ? 'paper' : 'card')
+  const [mobileSurface, setMobileSurface] = useState<'card' | 'paper'>('card')
+  const [mobilePaperPosition, setMobilePaperPosition] = useState(initialMobilePaperPosition)
+  const [isMobileViewport, setIsMobileViewport] = useState(() => window.innerWidth <= 700)
   const [nextReviewAt, setNextReviewAt] = useState<string>()
   const autoSpokenKeyRef = useRef<string | undefined>(undefined)
   const dragOffset = useRef<{ x: number; y: number } | undefined>(undefined)
+  const paperDrag = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number; moved: boolean } | undefined>(undefined)
+  const suppressPaperExpand = useRef(false)
   const wordsById = useMemo(() => new Map(words.map((word) => [word.id, word])), [words])
   const currentWord = wordsById.get(session.wordIds[session.currentWordIndex])
   const recallPlacement = session.placed[session.recallIndex]
@@ -113,13 +128,30 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   }, [])
 
   useEffect(() => {
-    if (session.stage === 'recall') setMobileSurface('paper')
-    else if (session.stage === 'learn' || session.stage === 'relearn' || session.stage === 'spell') setMobileSurface('card')
+    setMobileSurface('card')
   }, [session.stage])
 
   useEffect(() => {
     localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(panelPosition))
   }, [panelPosition])
+
+  useEffect(() => {
+    localStorage.setItem(PAPER_STORAGE_KEY, JSON.stringify(mobilePaperPosition))
+  }, [mobilePaperPosition])
+
+  useEffect(() => {
+    function keepPaperVisible() {
+      const width = 136
+      const height = 204
+      setIsMobileViewport(window.innerWidth <= 700)
+      setMobilePaperPosition((current) => ({
+        x: Math.max(8, Math.min(window.innerWidth - width - 8, current.x)),
+        y: Math.max(72, Math.min(window.innerHeight - height - 74, current.y)),
+      }))
+    }
+    window.addEventListener('resize', keepPaperVisible)
+    return () => window.removeEventListener('resize', keepPaperVisible)
+  }, [])
 
   useEffect(() => {
     function movePanel(event: PointerEvent) {
@@ -178,6 +210,52 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
         : session.stage === 'recall' && session.selectedRecallWordId ? recallWord
           : undefined
     if (visibleWord) playWord(visibleWord.word)
+  }
+
+  function startMobilePaperDrag(event: React.PointerEvent<HTMLDivElement>) {
+    if (!isMobileViewport || event.button !== 0) return
+    paperDrag.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - mobilePaperPosition.x,
+      offsetY: event.clientY - mobilePaperPosition.y,
+      moved: false,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function moveMobilePaper(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = paperDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (Math.abs(dx) + Math.abs(dy) > 6) drag.moved = true
+    if (!drag.moved) return
+    const width = 136
+    const height = 204
+    setMobilePaperPosition({
+      x: Math.max(8, Math.min(window.innerWidth - width - 8, event.clientX - drag.offsetX)),
+      y: Math.max(72, Math.min(window.innerHeight - height - 74, event.clientY - drag.offsetY)),
+    })
+  }
+
+  function endMobilePaperDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = paperDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    paperDrag.current = undefined
+    if (drag.moved) {
+      suppressPaperExpand.current = true
+      window.setTimeout(() => { suppressPaperExpand.current = false }, 350)
+    }
+  }
+
+  function expandMobilePaper() {
+    if (suppressPaperExpand.current) {
+      suppressPaperExpand.current = false
+      return
+    }
+    changeMobileSurface('paper')
   }
 
   useEffect(() => {
@@ -288,6 +366,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     const placed: PlacedWord[] = [...base.placed, { ...placement, wordId: currentWord.id, order: base.placed.length + 1 }]
     const shouldRecall = placed.length % 3 === 0 || placed.length === base.wordIds.length
     setCurrentPage(placement.page)
+    if (isMobileViewport) setMobileSurface('card')
     setMessage(shouldRecall ? `已写入${placed.length}个单词，开始累积回忆` : '已写入纸面，继续下一个单词')
     if (shouldRecall) {
       await update({ ...base, placed, preview: undefined, stage: 'recall', recallIndex: 0, recallLimit: placed.length, recallRound: base.recallRound + 1, selectedRecallWordId: undefined, revealedMeaning: false })
@@ -304,11 +383,12 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     if (item.wordId !== recallPlacement?.wordId) {
       playFeedbackSound('error', settings.soundEffects)
       setMessage('顺序不对，请继续寻找')
+      window.setTimeout(() => setMessage(''), 1800)
       return
     }
     setMessage('先在心里回忆释义，再显示答案')
     playWord(wordsById.get(item.wordId)?.word ?? '')
-    if (window.innerWidth <= 700) setMobileSurface('card')
+    if (isMobileViewport) setMobileSurface('card')
     await update({ ...session, selectedRecallWordId: item.wordId, revealedMeaning: false })
   }
 
@@ -347,8 +427,9 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     await update({ ...session, revealedMeaning: true })
   }
 
-  const placingBox = currentWord && session.stage === 'place' ? { word: currentWord.word, ...estimateWordBox(currentWord.word, settings.fontScale) } : undefined
+  const placingBox = currentWord && session.stage === 'place' && (!isMobileViewport || mobileSurface === 'paper') ? { word: currentWord.word, ...estimateWordBox(currentWord.word, settings.fontScale) } : undefined
   const progress = session.wordIds.length ? session.placed.length / session.wordIds.length : 0
+  const paperPages = Math.max(1, ...session.placed.map((item) => item.page + 1), session.preview ? session.preview.page + 1 : 1)
 
   if (session.stage === 'complete') {
     const summary = summaryFor(session)
@@ -382,29 +463,45 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
         <button className={settings.showSequence ? 'tool-button active' : 'tool-button'} onClick={toggleSequence}>{settings.showSequence ? <EyeOff size={17} /> : <Eye size={17} />}{settings.showSequence ? '隐藏序号' : '显示序号'}</button>
       </header>
 
-      <div className="mobile-surface-switcher" aria-label="学习内容切换">
-        <button className={mobileSurface === 'card' ? 'active' : ''} onClick={() => changeMobileSurface('card')}>单词卡片</button>
-        <button className={mobileSurface === 'paper' ? 'active' : ''} onClick={() => changeMobileSurface('paper')}>A4纸</button>
+      <div className={`mobile-paper-window${mobileSurface === 'paper' ? ' is-expanded' : ' is-collapsed'}`} style={isMobileViewport && mobileSurface === 'card' ? { left: mobilePaperPosition.x, top: mobilePaperPosition.y } : undefined}>
+        {isMobileViewport && mobileSurface === 'card' && <div className="mobile-paper-drag-handle" onPointerDown={startMobilePaperDrag} onPointerMove={moveMobilePaper} onPointerUp={endMobilePaperDrag} onPointerCancel={endMobilePaperDrag} onClick={expandMobilePaper} title="拖动A4纸，点击放大">
+          <GripHorizontal size={15} /><span>A4纸</span><small>{currentPage + 1}/{paperPages}</small><Maximize2 size={14} />
+        </div>}
+        <PaperCanvas
+          placed={session.placed}
+          words={wordsById}
+          currentPage={currentPage}
+          onPageChange={setCurrentPage}
+          onWordClick={(item) => {
+            if (isMobileViewport && mobileSurface !== 'paper') {
+              changeMobileSurface('paper')
+              return
+            }
+            void selectPaperWord(item)
+          }}
+          onPreview={(preview) => update({ ...session, preview })}
+          onInvalidPlacement={() => { playFeedbackSound('error', settings.soundEffects); setMessage('这里空间不足或超出纸面，请换一个位置，或新建下一页') }}
+          preview={session.preview}
+          placing={placingBox}
+          showSequence={settings.showSequence}
+          highlightedId={highlightedId}
+          onSpeak={playWord}
+          canHint={session.stage === 'recall' && !session.selectedRecallWordId}
+          onHint={hintPosition}
+          mobileExpanded={mobileSurface === 'paper'}
+          onMobileToggle={() => {
+            if (isMobileViewport && session.stage === 'place') return
+            changeMobileSurface(mobileSurface === 'paper' ? 'card' : 'paper')
+          }}
+          showMobileToggle={!isMobileViewport || session.stage !== 'place'}
+        />
+        {isMobileViewport && mobileSurface === 'paper' && session.stage === 'place' && currentWord && <div className="mobile-paper-placement-bar">
+          <div><strong>{currentWord.word}</strong><span className={!session.preview && message.includes('空间不足') ? 'has-error' : ''}>{session.preview ? '位置已选' : message.includes('空间不足') ? message : '点纸面选择位置'}</span></div>
+          {session.preview && <button className="text-button" onClick={() => update({ ...session, preview: undefined })}>重选</button>}
+          <button className="primary" disabled={!session.preview} onClick={() => session.preview && void placeWord(session, session.preview)}>确认放置</button>
+        </div>}
+        {isMobileViewport && mobileSurface === 'paper' && session.stage === 'recall' && message.includes('顺序不对') && <div className="mobile-paper-feedback" role="status">顺序不对，请继续寻找</div>}
       </div>
-
-      <PaperCanvas
-        placed={session.placed}
-        words={wordsById}
-        currentPage={currentPage}
-        onPageChange={setCurrentPage}
-        onWordClick={selectPaperWord}
-        onPreview={(preview) => update({ ...session, preview })}
-        onInvalidPlacement={() => { playFeedbackSound('error', settings.soundEffects); setMessage('这里空间不足或超出纸面，请换一个位置，或新建下一页') }}
-        preview={session.preview}
-        placing={placingBox}
-        showSequence={settings.showSequence}
-        highlightedId={highlightedId}
-        onSpeak={playWord}
-        canHint={session.stage === 'recall' && !session.selectedRecallWordId}
-        onHint={hintPosition}
-        mobileExpanded={mobileSurface === 'paper'}
-        onMobileToggle={() => changeMobileSurface(mobileSurface === 'paper' ? 'card' : 'paper')}
-      />
 
       <aside className={`study-panel floating-panel dock-${panelPosition.dock} stage-${session.stage}`} style={{ left: panelPosition.x, top: panelPosition.y }}>
         <div className="floating-panel-bar" onPointerDown={startPanelDrag}>
@@ -448,12 +545,12 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
         </form>}
 
         {session.stage === 'place' && currentWord && <div className="placement-panel">
-          <p className="prompt">点击纸面空白处，预览“{currentWord.word}”的位置。</p>
-          {session.preview ? <>
+          <p className="prompt">{isMobileViewport ? '在悬浮纸上选好位置，再点纸面底部的“确认放置”。' : `点击悬浮 A4 纸放大，再选“${currentWord.word}”的位置。`}</p>
+          {!isMobileViewport && session.preview ? <>
             <div className="placement-ready"><Check />当前位置可用</div>
             <button className="primary wide" onClick={() => placeWord(session, session.preview!)}>确认放置</button>
             <button className="text-button" onClick={() => update({ ...session, preview: undefined })}>重新选择</button>
-          </> : <p className="muted small">确认后位置将锁定，不能移动。</p>}
+          </> : !isMobileViewport && <p className="muted small">确认后位置将锁定，不能移动。</p>}
         </div>}
 
         {session.stage === 'recall' && recallWord && <div className="recall-panel">
