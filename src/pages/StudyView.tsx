@@ -1,13 +1,14 @@
-import { ArrowLeft, BookOpenCheck, Check, Eye, EyeOff, FileText, GripHorizontal, Keyboard, MapPin, PanelBottom, PanelLeft, PanelRight, PanelTop, RotateCcw, Volume2, X } from 'lucide-react'
+import { ArrowLeft, BookOpenCheck, Check, Eye, EyeOff, FileText, GripHorizontal, Heart, Keyboard, Lightbulb, MapPin, PanelBottom, PanelLeft, PanelRight, PanelTop, RotateCcw, Timer, Volume2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { db } from '../db'
 import { estimateWordBox, findRandomPlacement, normalizeWord, summaryFor } from '../lib/study'
-import { finishSession } from '../lib/session'
+import { finishSession, savePartialSession } from '../lib/session'
 import { playFeedbackSound } from '../lib/sound'
 import { playOnlinePronunciation, stopPronunciationAudio } from '../lib/pronunciation'
 import type { AppSettings, PlacedWord, RecallRating, StudySession, WordEntry } from '../types'
 import { PaperCanvas } from '../components/PaperCanvas'
 import { MeaningDisplay } from '../components/MeaningDisplay'
+import { createEmptyCard } from 'ts-fsrs'
 
 interface StudyViewProps {
   initial: StudySession
@@ -29,6 +30,29 @@ interface PanelPosition {
 const PANEL_WIDTH = 380
 const PANEL_HEIGHT = 650
 const PANEL_STORAGE_KEY = 'a4-word-memory-panel-position'
+
+const WORD_PREFIXES = ['counter', 'inter', 'trans', 'under', 'over', 'tele', 'auto', 'anti', 'sub', 'pre', 'pro', 're', 'un', 'dis', 'con', 'de', 'ex', 'in', 'im']
+const WORD_SUFFIXES = ['ability', 'tion', 'sion', 'ment', 'ness', 'ity', 'able', 'ible', 'ive', 'ous', 'ful', 'less', 'ing', 'ed', 'ly', 'er', 'or']
+
+function wordMemoryParts(word: string) {
+  const lower = word.toLowerCase()
+  const prefix = [...WORD_PREFIXES].sort((a, b) => b.length - a.length).find((item) => lower.startsWith(item) && lower.length - item.length >= 4)
+  const suffix = [...WORD_SUFFIXES].sort((a, b) => b.length - a.length).find((item) => lower.endsWith(item) && lower.length - item.length - (prefix?.length ?? 0) >= 3)
+  const rootStart = prefix?.length ?? 0
+  const rootEnd = lower.length - (suffix?.length ?? 0)
+  if (!prefix && !suffix) return [{ text: word, label: '整体' }]
+  return [
+    ...(prefix ? [{ text: word.slice(0, prefix.length), label: '前缀' }] : []),
+    ...(rootEnd > rootStart ? [{ text: word.slice(rootStart, rootEnd), label: '词根' }] : []),
+    ...(suffix ? [{ text: word.slice(-suffix.length), label: '后缀' }] : []),
+  ]
+}
+
+function formatElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+  const remaining = seconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(remaining).padStart(2, '0')}`
+}
 
 function panelSize(dock: PanelDock = 'free') {
   if (dock === 'top' || dock === 'bottom') {
@@ -91,6 +115,11 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   const [mobileSurface, setMobileSurface] = useState<'card' | 'paper'>('card')
   const [isMobileViewport, setIsMobileViewport] = useState(() => window.innerWidth <= 700)
   const [nextReviewAt, setNextReviewAt] = useState<string>()
+  const activeSecondsRef = useRef(initial.activeSeconds ?? 0)
+  const activeSinceRef = useRef(Date.now())
+  const lastCheckpointRef = useRef(Date.now())
+  const [elapsedSeconds, setElapsedSeconds] = useState(initial.activeSeconds ?? 0)
+  const [favoriteWordIds, setFavoriteWordIds] = useState<Set<string>>(new Set())
   const autoSpokenKeyRef = useRef<string | undefined>(undefined)
   const dragOffset = useRef<{ x: number; y: number } | undefined>(undefined)
   const wordsById = useMemo(() => new Map(words.map((word) => [word.id, word])), [words])
@@ -98,6 +127,39 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   const recallPlacement = session.placed[session.recallIndex]
   const recallWord = recallPlacement ? wordsById.get(recallPlacement.wordId) : undefined
   const relearnWord = session.selectedRecallWordId ? wordsById.get(session.selectedRecallWordId) : undefined
+
+  function checkpointSession(value: StudySession) {
+    const now = Date.now()
+    const activeSeconds = activeSecondsRef.current + Math.floor((now - activeSinceRef.current) / 1000)
+    activeSecondsRef.current = activeSeconds
+    activeSinceRef.current = now
+    lastCheckpointRef.current = now
+    setElapsedSeconds(activeSeconds)
+    return { ...value, activeSeconds }
+  }
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      const activeSeconds = activeSecondsRef.current + Math.floor((now - activeSinceRef.current) / 1000)
+      setElapsedSeconds(activeSeconds)
+      if (now - lastCheckpointRef.current >= 10000) {
+        const value = checkpointSession(session)
+        void savePartialSession(value).catch(() => setMessage('学习进度暂时无法保存，请检查浏览器存储空间'))
+      }
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [session])
+
+  useEffect(() => {
+    const ids = [currentWord?.id, relearnWord?.id, recallWord?.id].filter((id): id is string => Boolean(id))
+    if (!ids.length) return
+    void db.cards.bulkGet(ids).then((stored) => setFavoriteWordIds((current) => {
+      const next = new Set(current)
+      stored.forEach((card) => { if (card?.favorite) next.add(card.wordId); else if (card) next.delete(card.wordId) })
+      return next
+    }))
+  }, [currentWord?.id, relearnWord?.id, recallWord?.id])
 
   useEffect(() => {
     if (!('speechSynthesis' in window)) return
@@ -202,6 +264,20 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     })
   }
 
+  async function toggleFavorite(wordId: string) {
+    const next = !favoriteWordIds.has(wordId)
+    const existing = await db.cards.get(wordId)
+    if (existing) await db.cards.update(wordId, { favorite: next })
+    else await db.cards.put({ wordId, card: createEmptyCard(new Date()), favorite: next })
+    setFavoriteWordIds((current) => {
+      const value = new Set(current)
+      if (next) value.add(wordId)
+      else value.delete(wordId)
+      return value
+    })
+    setMessage(next ? '已收藏这个单词' : '已取消收藏')
+  }
+
   function changeMobileSurface(next: 'card' | 'paper') {
     setMobileSurface(next)
     if (next !== 'card') return
@@ -224,7 +300,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   }, [currentWord, relearnWord, session.currentWordIndex, session.recallIndex, session.recallRound, session.stage, settings.accent, settings.autoSpeak, settings.speechRate])
 
   async function update(next: StudySession) {
-    const value = { ...next, updatedAt: new Date().toISOString() }
+    const value = { ...checkpointSession(next), updatedAt: new Date().toISOString() }
     try {
       await db.sessions.put(value)
       setSession(value)
@@ -233,9 +309,20 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     }
   }
 
+  async function leaveStudy() {
+    try {
+      const value = checkpointSession(session)
+      await savePartialSession(value)
+      setSession(value)
+      onExit()
+    } catch {
+      setMessage('暂时离开失败，学习进度未能保存，请稍后重试。')
+    }
+  }
+
   async function complete(next: StudySession) {
     try {
-      const finished = await finishSession(next)
+      const finished = await finishSession(checkpointSession(next))
       playFeedbackSound('finish', settings.soundEffects)
       const cards = (await db.cards.bulkGet(finished.wordIds)).filter(Boolean)
       const nextDue = cards.map((card) => new Date(card!.card.due).getTime()).filter(Number.isFinite).sort((a, b) => a - b)[0]
@@ -298,9 +385,41 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   async function revealAnswer(skip: boolean) {
     if (!currentWord) return
     playFeedbackSound(skip ? 'error' : 'complete', settings.soundEffects)
-    setSpelling(currentWord.word)
     const repetitionTarget = Math.max(1, settings.repetitionsPerWord ?? 3)
-    setMessage(skip ? `已记为忘记。重新背${repetitionTarget}遍后，再正确拼写。` : `重新背${repetitionTarget}遍后，再正确拼写。`)
+    if (skip) {
+      const currentIndex = session.currentWordIndex
+      const remaining = session.wordIds.filter((_, index) => index !== currentIndex)
+      const reordered = [...remaining, currentWord.id]
+      const hasNext = currentIndex < reordered.length - 1
+      setSpelling('')
+      if (hasNext) {
+        await update({
+          ...session,
+          wordIds: reordered,
+          stage: 'learn',
+          currentWordIndex: currentIndex,
+          repetitions: 0,
+          metrics: { ...session.metrics, spellingSkips: session.metrics.spellingSkips + 1 },
+          spellingForgottenWordIds: session.spellingForgottenWordIds.includes(currentWord.id) ? session.spellingForgottenWordIds : [...session.spellingForgottenWordIds, currentWord.id],
+        })
+        setMessage('已暂时跳过，先学习下一个单词；本轮末尾会再回来')
+        return
+      }
+      await update({
+        ...session,
+        wordIds: reordered,
+        stage: 'place',
+        currentWordIndex: reordered.length - 1,
+        repetitions: 0,
+        preview: undefined,
+        metrics: { ...session.metrics, spellingSkips: session.metrics.spellingSkips + 1 },
+        spellingForgottenWordIds: session.spellingForgottenWordIds.includes(currentWord.id) ? session.spellingForgottenWordIds : [...session.spellingForgottenWordIds, currentWord.id],
+      })
+      setMessage('已暂时跳过拼写，请先把这个词放到 A4 纸上')
+      return
+    }
+    setSpelling(currentWord.word)
+    setMessage(`重新背${repetitionTarget}遍后，再正确拼写。`)
     await update({
       ...session,
       stage: 'learn',
@@ -308,11 +427,9 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
       metrics: {
         ...session.metrics,
         answerReveals: session.metrics.answerReveals + 1,
-        spellingSkips: session.metrics.spellingSkips + (skip ? 1 : 0),
+        spellingSkips: session.metrics.spellingSkips,
       },
-      spellingForgottenWordIds: skip && !session.spellingForgottenWordIds.includes(currentWord.id)
-        ? [...session.spellingForgottenWordIds, currentWord.id]
-        : session.spellingForgottenWordIds,
+      spellingForgottenWordIds: session.spellingForgottenWordIds,
     })
   }
 
@@ -372,7 +489,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   }
 
   async function toggleSequence() {
-    const next = { ...settings, showSequence: !settings.showSequence }
+    const next = { ...settings, showSequence: !settings.showSequence, sequencePreferenceSet: true }
     onSettings(next)
     if (!settings.showSequence && session.stage === 'recall') {
       await update({ ...session, metrics: { ...session.metrics, sequenceAids: session.metrics.sequenceAids + 1 } })
@@ -410,13 +527,14 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   return (
     <div className={`study-layout mobile-surface-${mobileSurface}`}>
       <header className="study-header">
-        <button className="tool-button" onClick={onExit}><ArrowLeft size={17} />暂时离开</button>
+        <button className="tool-button" onClick={() => void leaveStudy()}><ArrowLeft size={17} />暂时离开</button>
         <button className="tool-button mobile-paper-launch" onClick={() => changeMobileSurface('paper')}><FileText size={17} />A4纸</button>
         <div className="study-progress">
           <span>{session.libraryName}</span>
           <div className="progress-track"><i style={{ width: `${progress * 100}%` }} /></div>
           <span>{session.placed.length}/{session.wordIds.length}</span>
         </div>
+        <span className="study-timer" title="本轮学习用时"><Timer size={15} />{formatElapsed(elapsedSeconds)}</span>
         <button className={settings.showSequence ? 'tool-button active' : 'tool-button'} onClick={toggleSequence}>{settings.showSequence ? <EyeOff size={17} /> : <Eye size={17} />}{settings.showSequence ? '隐藏序号' : '显示序号'}</button>
       </header>
 
@@ -482,10 +600,12 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
 
         {(session.stage === 'learn' || session.stage === 'relearn') && (session.stage === 'relearn' ? relearnWord : currentWord) && (() => {
           const word = session.stage === 'relearn' ? relearnWord! : currentWord!
+          const parts = wordMemoryParts(word.word)
           return <div className="word-study">
-            <button className="word-title" onClick={() => playWord(word.word)}>{word.word}<Volume2 size={19} /></button>
+            <div className="word-title-row"><button className="word-title" onClick={() => playWord(word.word)}>{word.word}<Volume2 size={19} /></button><button className={favoriteWordIds.has(word.id) ? 'word-favorite active' : 'word-favorite'} onClick={() => void toggleFavorite(word.id)} aria-label={favoriteWordIds.has(word.id) ? '取消收藏单词' : '收藏单词'} title={favoriteWordIds.has(word.id) ? '取消收藏' : '收藏'}><Heart /></button></div>
             {settings.showPhonetic && <p className="phonetic">{word.phonetic || '暂无音标'}</p>}
             {settings.showMeaning && <MeaningDisplay meaning={word.meaning} partOfSpeech={settings.showPartOfSpeech ? word.partOfSpeech : undefined} />}
+            <details className="word-memory-help"><summary><Lightbulb size={15} />拆分记忆与词根词缀</summary><div className="word-parts">{parts.map((part) => <span key={`${part.label}-${part.text}`}><strong>{part.text}</strong><small>{part.label}</small></span>)}</div><p>把单词拆成可识别的部分，先记结构，再回忆完整拼写。</p></details>
             <div className="repetition-dots" aria-label={`已完成${session.repetitions}遍`}>
               {Array.from({ length: Math.max(1, settings.repetitionsPerWord ?? 3) }, (_, index) => index + 1).map((item) => <i key={item} className={item <= session.repetitions ? 'done' : ''} />)}
             </div>
@@ -533,7 +653,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
           </>}
         </div>}
 
-        {message && <div className={message.includes('不正确') || message.includes('顺序不对') || message.includes('朗读') ? 'inline-message error' : 'inline-message'}><span>{message}</span><button onClick={() => setMessage('')} aria-label="关闭提示"><X size={15} /></button></div>}
+        {message && (settings.showStudyHints || message.includes('不正确') || message.includes('顺序不对') || message.includes('朗读') || message.includes('失败')) && <div className={message.includes('不正确') || message.includes('顺序不对') || message.includes('朗读') || message.includes('失败') ? 'inline-message error' : 'inline-message'}><span>{message}</span><label className="hint-dismiss"><input type="checkbox" checked={!settings.showStudyHints} onChange={(event) => void onSettings({ ...settings, showStudyHints: !event.target.checked })} />不再提示</label><button onClick={() => setMessage('')} aria-label="关闭提示"><X size={15} /></button></div>}
       </aside>
     </div>
   )

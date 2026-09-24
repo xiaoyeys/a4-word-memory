@@ -6,6 +6,8 @@ export function libraryFolderId(libraryId: string) {
   return `memory-folder-library-${libraryId}`
 }
 
+export const defaultFolderId = 'memory-folder-default'
+
 export function paperId(sessionId: string) {
   return `memory-paper-${sessionId}`
 }
@@ -72,13 +74,29 @@ export function buildArchiveRecords(
 export async function syncMemoryArchive(libraries: WordLibrary[], words: WordEntry[], sessions: StudySession[]) {
   const [existingFolders, existingPapers] = await Promise.all([db.memoryFolders.toArray(), db.memoryPapers.toArray()])
   const records = buildArchiveRecords(libraries, words, sessions, existingFolders, existingPapers)
-  if (!records.folders.length && !records.papers.length) return
+  const now = new Date().toISOString()
+  const defaultFolder = existingFolders.find((folder) => folder.id === defaultFolderId) ?? {
+    id: defaultFolderId,
+    name: '默认文件夹',
+    kind: 'custom' as const,
+    order: 0,
+    createdAt: now,
+    updatedAt: now,
+  }
+  const libraryFolderIds = new Set(existingFolders.filter((folder) => folder.kind === 'library').map((folder) => folder.id))
+  const papersToMove = existingPapers.filter((paper) => paper.folderId !== defaultFolderId && (libraryFolderIds.has(paper.folderId) || paper.folderId.startsWith('memory-folder-library-')))
+  if (!records.folders.length && !records.papers.length && !papersToMove.length && existingFolders.some((folder) => folder.id === defaultFolderId)) return
   await db.transaction('rw', db.memoryFolders, db.memoryPapers, async () => {
+    if (!(await db.memoryFolders.get(defaultFolderId))) await db.memoryFolders.add(defaultFolder)
     for (const folder of records.folders) {
-      if (!(await db.memoryFolders.get(folder.id))) await db.memoryFolders.add(folder)
+      // Existing releases created one folder per library. Keep those records out of
+      // the UI now that the archive uses one default folder plus user folders.
+      if (folder.kind !== 'library' && !(await db.memoryFolders.get(folder.id))) await db.memoryFolders.add(folder)
     }
     for (const paper of records.papers) {
-      if (!(await db.memoryPapers.where('sourceSessionId').equals(paper.sourceSessionId).first())) await db.memoryPapers.add(paper)
+      if (!(await db.memoryPapers.where('sourceSessionId').equals(paper.sourceSessionId).first())) await db.memoryPapers.add({ ...paper, folderId: defaultFolderId })
     }
+    for (const paper of papersToMove) await db.memoryPapers.update(paper.id, { folderId: defaultFolderId, updatedAt: now })
+    for (const folder of existingFolders.filter((item) => item.kind === 'library')) await db.memoryFolders.delete(folder.id)
   })
 }

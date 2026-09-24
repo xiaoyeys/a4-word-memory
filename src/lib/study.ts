@@ -81,7 +81,7 @@ export function summaryFor(session: StudySession): SessionSummary {
     firstRecallRate: groups.length ? firstRemembered / groups.length : 0,
     finalMasteryRate: groups.length ? finalRemembered / groups.length : 0,
     ...counts,
-    durationMinutes: Math.max(1, Math.round((new Date(session.completedAt ?? session.updatedAt).getTime() - new Date(session.startedAt).getTime()) / 60000)),
+    durationMinutes: Math.max(1, Math.round((session.activeSeconds ?? (new Date(session.completedAt ?? session.updatedAt).getTime() - new Date(session.startedAt).getTime()) / 1000) / 60)),
   }
 }
 

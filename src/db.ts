@@ -63,7 +63,9 @@ export async function initializeDatabase() {
 
 export async function getSettings() {
   const stored = (await db.settings.get('app'))?.value
-  return stored ? { ...defaultSettings, ...stored } : defaultSettings
+  if (!stored) return defaultSettings
+  if (!stored.sequencePreferenceSet) return { ...defaultSettings, ...stored, showSequence: true, sequencePreferenceSet: true }
+  return { ...defaultSettings, ...stored }
 }
 
 export async function saveSettings(value: AppSettings) {

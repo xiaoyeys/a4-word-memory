@@ -109,11 +109,12 @@ export function PaperCanvas(props: PaperCanvasProps) {
           <div ref={ref} className={`${props.placing ? 'a4-paper placing' : 'a4-paper'} paper-theme-${props.paperTheme ?? 'plain'}`} onClick={selectPoint}>
             {pageWords.map((item) => {
               const word = props.words.get(item.wordId)?.word ?? ''
+              const paperWordScale = props.mobileExpanded ? 1.45 : 1
               return (
                 <button
                   className={props.highlightedId === item.wordId ? 'paper-word highlighted' : 'paper-word'}
                   key={item.wordId}
-                  style={{ left: `${item.x / PAGE_WIDTH * 100}%`, top: `${item.y / PAGE_HEIGHT * 100}%`, width: `${item.width / PAGE_WIDTH * 100}%`, minHeight: `${item.height / PAGE_HEIGHT * 100}%`, fontSize: `${item.fontSize / PAGE_WIDTH * 100}cqw` }}
+                  style={{ left: `${item.x / PAGE_WIDTH * 100}%`, top: `${item.y / PAGE_HEIGHT * 100}%`, width: `${item.width / PAGE_WIDTH * 100}%`, minHeight: `${item.height / PAGE_HEIGHT * 100}%`, fontSize: `${item.fontSize * paperWordScale / PAGE_WIDTH * 100}cqw` }}
                   onClick={(event) => { event.stopPropagation(); props.onWordClick(item) }}
                   title="点击选择单词"
                 >

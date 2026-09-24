@@ -34,12 +34,31 @@ export function splitMeaning(meaning: string, fallbackPartOfSpeech?: string): Me
   return parts.length ? parts : [{ label: formatPartOfSpeech(fallbackPartOfSpeech), text: tidyMeaning(meaning) }]
 }
 
+export function emphasizedMeaningParts(text: string) {
+  const segments = text.split(/([、,，;；])/)
+  let meaningIndex = 0
+  let nextGroupPrimary = false
+  return segments.filter(Boolean).map((segment) => {
+    const separator = /^[、,，;；]$/.test(segment)
+    if (separator) {
+      if (/[;；]/.test(segment)) nextGroupPrimary = true
+      return { text: segment, bold: false }
+    }
+    const bold = meaningIndex < 2 || nextGroupPrimary
+    nextGroupPrimary = false
+    meaningIndex += 1
+    return { text: segment, bold }
+  })
+}
+
 export function MeaningDisplay({ meaning, partOfSpeech, compact = false }: { meaning: string; partOfSpeech?: string; compact?: boolean }) {
   const parts = splitMeaning(meaning, partOfSpeech)
   return <div className={compact ? 'meaning-display compact' : 'meaning-display'}>
     {parts.map((part, index) => <div className="meaning-line" key={`${part.label ?? 'meaning'}-${index}`}>
       {part.label && <span className="meaning-pos">{part.label}</span>}
-      <span className="meaning-text">{part.text}</span>
+      <span className="meaning-text">{emphasizedMeaningParts(part.text).map((segment, segmentIndex) => segment.bold
+        ? <strong className="meaning-primary" key={segmentIndex}>{segment.text}</strong>
+        : <span key={segmentIndex}>{segment.text}</span>)}</span>
     </div>)}
   </div>
 }

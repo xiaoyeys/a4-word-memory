@@ -1,4 +1,5 @@
 import { db } from '../db'
+import { createEmptyCard } from 'ts-fsrs'
 import type { PlacementMode, StudyMode, StudySession, WordEntry, WordLibrary } from '../types'
 import { aggregateRating, pickWords, scheduleCard } from './study'
 
@@ -59,8 +60,31 @@ export async function finishSession(session: StudySession) {
       scheduled.spellingErrorCount = (stored?.spellingErrorCount ?? 0) + (completed.spellingErrorWordIds?.filter((id) => id === wordId).length ?? 0) + (completed.spellingForgottenWordIds.includes(wordId) ? 1 : 0)
       scheduled.important = stored?.important ?? false
       scheduled.confusing = stored?.confusing ?? false
+      scheduled.favorite = stored?.favorite ?? false
       await db.cards.put(scheduled)
     }
   })
   return completed
+}
+
+/** Persist words genuinely encountered so far without advancing their FSRS schedule. */
+export async function savePartialSession(session: StudySession) {
+  const now = new Date().toISOString()
+  const currentWordId = session.wordIds[session.currentWordIndex]
+  const touchedIds = new Set([
+    ...session.placed.map((item) => item.wordId),
+    ...session.events.map((event) => event.wordId),
+    ...(session.spellingErrorWordIds ?? []),
+    ...session.spellingForgottenWordIds,
+    ...(session.repetitions > 0 || ['spell', 'place', 'relearn'].includes(session.stage) ? [currentWordId] : []),
+  ].filter((id): id is string => Boolean(id)))
+  const checkpoint = { ...session, updatedAt: now }
+  await db.transaction('rw', db.sessions, db.cards, async () => {
+    await db.sessions.put(checkpoint)
+    for (const wordId of touchedIds) {
+      if (await db.cards.get(wordId)) continue
+      await db.cards.put({ wordId, card: createEmptyCard(new Date()), lastStudiedAt: now })
+    }
+  })
+  return checkpoint
 }

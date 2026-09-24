@@ -37,6 +37,7 @@ export interface StoredCard {
   spellingErrorCount?: number
   important?: boolean
   confusing?: boolean
+  favorite?: boolean
 }
 
 export interface PlacedWord {
@@ -91,6 +92,7 @@ export interface StudySession {
   spellingErrorWordIds?: string[]
   startedAt: string
   updatedAt: string
+  activeSeconds?: number
   completedAt?: string
   status: 'active' | 'completed' | 'abandoned'
 }
@@ -137,6 +139,7 @@ export interface AppSettings {
   defaultPlacement: PlacementMode
   allowRecentRepeat: boolean
   showSequence: boolean
+  sequencePreferenceSet: boolean
   onboardingDone: boolean
   backupReminderShown: boolean
   lastBackupAt?: string
@@ -153,6 +156,7 @@ export interface AppSettings {
   speechRate: number
   reminderEnabled: boolean
   reminderTime: string
+  showStudyHints: boolean
 }
 
 export interface SessionSummary {
@@ -171,7 +175,8 @@ export const defaultSettings: AppSettings = {
   fontScale: 1,
   defaultPlacement: 'manual',
   allowRecentRepeat: false,
-  showSequence: false,
+  showSequence: true,
+  sequencePreferenceSet: false,
   onboardingDone: false,
   backupReminderShown: false,
   dailyNewWordTarget: 30,
@@ -186,4 +191,5 @@ export const defaultSettings: AppSettings = {
   speechRate: 1,
   reminderEnabled: false,
   reminderTime: '20:00',
+  showStudyHints: true,
 }

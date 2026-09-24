@@ -64,4 +64,16 @@ describe('study rules', () => {
     expect(new Date(result.card.due).getTime()).toBeGreaterThan(now.getTime())
     expect(result.lastStudiedAt).toBe(now.toISOString())
   })
+
+  it('uses accumulated active study time instead of wall-clock time for a resumed session', async () => {
+    const { summaryFor } = await import('./study')
+    const session = {
+      id: 'session', libraryId: 'lib', libraryName: 'Test', mode: 'random', placementMode: 'manual', targetCount: 1,
+      wordIds: ['one'], placed: [], stage: 'learn', currentWordIndex: 0, repetitions: 0, recallIndex: 0, recallRound: 0,
+      recallLimit: 0, revealedMeaning: false, events: [], metrics: { spellingErrors: 0, answerReveals: 0, spellingSkips: 0, positionHints: 0, sequenceAids: 0 },
+      spellingForgottenWordIds: [], startedAt: '2026-09-20T10:00:00.000Z', updatedAt: '2026-09-20T12:00:00.000Z',
+      completedAt: '2026-09-20T12:00:00.000Z', activeSeconds: 125, status: 'completed',
+    } as const
+    expect(summaryFor(session as never).durationMinutes).toBe(2)
+  })
 })

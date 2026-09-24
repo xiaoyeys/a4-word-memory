@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { MeaningDisplay } from '../components/MeaningDisplay'
 import { PaperCanvas } from '../components/PaperCanvas'
 import { db } from '../db'
-import { libraryFolderId } from '../lib/memoryArchive'
+import { defaultFolderId } from '../lib/memoryArchive'
 import { playOnlinePronunciation, stopPronunciationAudio } from '../lib/pronunciation'
 import { PAGE_HEIGHT, PAGE_WIDTH } from '../lib/study'
 import type { AppSettings, MemoryFolder, MemoryPaper, MemoryWordSnapshot, PlacedWord } from '../types'
@@ -97,14 +97,14 @@ export function ArchiveView({ folders, papers, settings, onChanged }: ArchiveVie
   }
 
   async function deleteFolder(folder: MemoryFolder) {
-    if (folder.kind !== 'custom' || !window.confirm(`删除“${folder.name}”？里面的记忆纸会回到各自词书的默认文件夹。`)) return
+    if (folder.id === defaultFolderId || folder.kind !== 'custom' || !window.confirm(`删除“${folder.name}”？里面的记忆纸会回到默认文件夹。`)) return
     const affected = visiblePapers.filter((paper) => paper.folderId === folder.id)
     const now = new Date().toISOString()
     await db.transaction('rw', db.memoryFolders, db.memoryPapers, async () => {
       for (const paper of affected) {
-        const targetId = libraryFolderId(paper.libraryId)
+        const targetId = defaultFolderId
         if (!(await db.memoryFolders.get(targetId))) {
-          await db.memoryFolders.add({ id: targetId, name: paper.libraryName, kind: 'library', libraryId: paper.libraryId, order: 0, createdAt: now, updatedAt: now })
+          await db.memoryFolders.add({ id: targetId, name: '默认文件夹', kind: 'custom', order: 0, createdAt: now, updatedAt: now })
         }
         await db.memoryPapers.update(paper.id, { folderId: targetId, updatedAt: now })
       }
@@ -167,7 +167,7 @@ export function ArchiveView({ folders, papers, settings, onChanged }: ArchiveVie
         {sortedFolders.map((folder) => <div className={folderFilter === folder.id ? 'archive-folder-row active' : 'archive-folder-row'} key={folder.id}>
           <button className="archive-folder" onClick={() => setFolderFilter(folder.id)}>{folder.kind === 'library' ? <BookOpen /> : <Folder />}<span><strong>{folder.name}</strong><small>{visiblePapers.filter((paper) => paper.folderId === folder.id).length} 张</small></span></button>
           <button className="folder-action" onClick={() => renameFolder(folder)} title="重命名文件夹" aria-label={`重命名${folder.name}`}><Pencil /></button>
-          {folder.kind === 'custom' && <button className="folder-action danger" onClick={() => deleteFolder(folder)} title="删除文件夹" aria-label={`删除${folder.name}`}><Trash2 /></button>}
+          {folder.kind === 'custom' && folder.id !== defaultFolderId && <button className="folder-action danger" onClick={() => deleteFolder(folder)} title="删除文件夹" aria-label={`删除${folder.name}`}><Trash2 /></button>}
         </div>)}
       </aside>
       <section className="archive-content">
