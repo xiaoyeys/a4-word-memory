@@ -28,4 +28,15 @@ describe('memory archive synchronization', () => {
     expect(result.folders).toEqual([])
     expect(result.papers).toEqual([])
   })
+
+  it('only creates a quick-review paper when there are forgotten words', () => {
+    const blankReview = { ...session, id: 'review-blank', mode: 'due', methods: [], placed: [] } as StudySession
+    const blankResult = buildArchiveRecords([library], [word], [blankReview], [], [], '2026-09-22T00:00:00.000Z')
+    expect(blankResult.papers).toEqual([])
+
+    const forgottenReview = { ...session, id: 'review-forgotten', mode: 'due', methods: [] } as StudySession
+    const result = buildArchiveRecords([library], [word], [forgottenReview], [], [], '2026-09-22T00:00:00.000Z')
+    expect(result.papers).toHaveLength(1)
+    expect(result.papers[0]).toMatchObject({ mode: 'due', title: expect.stringContaining('复习错词'), words: [{ id: word.id }] })
+  })
 })

@@ -6,6 +6,11 @@ export interface BundledLibrary extends WordLibrary {
   fileName: string
 }
 
+export interface VocabularyLoadProgress {
+  phase: 'downloading' | 'processing'
+  percent?: number
+}
+
 interface VocabularyFile {
   name: string
   description: string
@@ -18,6 +23,9 @@ interface VocabularyFile {
 }
 
 const catalog: Array<Omit<BundledLibrary, 'kind' | 'version' | 'createdAt' | 'updatedAt'>> = [
+  { id: 'builtin-primary', fileName: 'primary.json', name: '小学课标词汇', description: '义务教育英语课程标准（2022年版）小学二级词汇', wordCount: 505 },
+  { id: 'builtin-zhongkao', fileName: 'zhongkao.json', name: '中考核心词汇', description: '初中英语及中考常用词汇', wordCount: 1603 },
+  { id: 'builtin-gaokao', fileName: 'gaokao.json', name: '高考核心词汇', description: '高中英语及高考常用词汇', wordCount: 3677 },
   { id: 'builtin-cet4', fileName: 'cet4.json', name: 'CET-4 核心词汇', description: '大学英语四级考试大纲词汇', wordCount: 3815 },
   { id: 'builtin-cet4-high-frequency', fileName: 'cet4_high_freq.json', name: 'CET-4 高频词汇', description: '四级大纲中的高频词汇', wordCount: 2480 },
   { id: 'builtin-cet6', fileName: 'cet6.json', name: 'CET-6 核心词汇', description: '大学英语六级考试大纲词汇', wordCount: 5371 },
@@ -85,9 +93,38 @@ export function convertVocabularyWords(library: BundledLibrary, source: Vocabula
   })
 }
 
-export async function loadBuiltinWords(library: BundledLibrary, existingWords: WordEntry[] = []) {
+async function readVocabularyResponse(response: Response, onProgress?: (progress: VocabularyLoadProgress) => void) {
+  const total = Number(response.headers.get('content-length')) || undefined
+  if (!response.body) {
+    onProgress?.({ phase: 'downloading' })
+    return response.json() as Promise<VocabularyFile>
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let received = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    received += value.byteLength
+    onProgress?.({ phase: 'downloading', percent: total ? Math.min(100, Math.round(received / total * 100)) : undefined })
+  }
+
+  const bytes = new Uint8Array(received)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as VocabularyFile
+}
+
+export async function loadBuiltinWords(library: BundledLibrary, existingWords: WordEntry[] = [], onProgress?: (progress: VocabularyLoadProgress) => void) {
+  onProgress?.({ phase: 'downloading', percent: 0 })
   const response = await fetch(`${import.meta.env.BASE_URL}vocabularies/${library.fileName}`)
   if (!response.ok) throw new Error(`无法读取词库 ${library.name}（${response.status}）`)
-  const source = await response.json() as VocabularyFile
+  const source = await readVocabularyResponse(response, onProgress)
+  onProgress?.({ phase: 'processing', percent: 100 })
   return convertVocabularyWords(library, source, existingWords)
 }

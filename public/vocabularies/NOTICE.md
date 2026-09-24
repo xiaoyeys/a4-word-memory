@@ -2,7 +2,7 @@
 
 ## 词库数据来源
 
-本仓库所有词库 JSON 均由 **ECDICT** 生成：
+本仓库词库中的音标、词性和中文释义均由 **ECDICT** 生成：
 
 - 项目：ECDICT — Free English to Chinese Dictionary Database
 - 作者：Linwei (skywind3000)
@@ -39,6 +39,8 @@ SOFTWARE.
 
 | 词库 | 派生规则 |
 |---|---|
+| primary | 词目取自教育部《义务教育英语课程标准（2022年版）》附录 3“二级词汇表”的小学阶段 505 个基本词汇（所用扫描 PDF 第 95–104 页，印刷页码 88–97）；音标和释义按词头匹配 ECDICT，少量缩写释义按小学语境校正 |
+| zhongkao / gaokao | ECDICT 的 `zk`（中考）/ `gk`（高考）事实性标签 |
 | cet4 / cet6 / kaoyan / toefl / ielts_core / gre | ECDICT 按考试大纲的事实性标注（tag 字段） |
 | *_high_freq | 对应大纲词汇 ∩ 语料库词频（bnc/frq 字段）排名前 N |
 | ielts_basic | 雅思词汇 ∩（牛津 3000 ∪ 柯林斯 ≥3 星） |

@@ -16,7 +16,16 @@ describe('backup validation', () => {
       settings: [{ key: 'app', value: {} }],
     }))
     expect(data.words).toHaveLength(1)
-    expect(data.version).toBe(2)
+    expect(data.version).toBe(3)
+    expect(data.memoryPapers).toEqual([])
+  })
+
+  it('accepts and normalizes a version two archive backup for version three', async () => {
+    const data = await inspectBackup(backupFile({
+      product: 'A4词忆', version: 2, exportedAt: '2026-09-21T00:00:00.000Z',
+      libraries: [], words: [], sessions: [], cards: [], settings: [], memoryFolders: [], memoryPapers: [],
+    }))
+    expect(data.version).toBe(3)
     expect(data.memoryPapers).toEqual([])
   })
 

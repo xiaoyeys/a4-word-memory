@@ -51,8 +51,15 @@ export function emphasizedMeaningParts(text: string) {
   })
 }
 
-export function MeaningDisplay({ meaning, partOfSpeech, compact = false }: { meaning: string; partOfSpeech?: string; compact?: boolean }) {
-  const parts = splitMeaning(meaning, partOfSpeech)
+function limitMeaningText(text: string, limit?: number) {
+  if (!limit || limit < 1) return text
+  const pieces = text.split(/[、,，;；]/).map((piece) => piece.trim()).filter(Boolean)
+  if (pieces.length <= limit) return text
+  return pieces.slice(0, limit).join('、')
+}
+
+export function MeaningDisplay({ meaning, partOfSpeech, compact = false, maxMeaningsPerPart }: { meaning: string; partOfSpeech?: string; compact?: boolean; maxMeaningsPerPart?: number }) {
+  const parts = splitMeaning(meaning, partOfSpeech).map((part) => ({ ...part, text: limitMeaningText(part.text, maxMeaningsPerPart) }))
   return <div className={compact ? 'meaning-display compact' : 'meaning-display'}>
     {parts.map((part, index) => <div className="meaning-line" key={`${part.label ?? 'meaning'}-${index}`}>
       {part.label && <span className="meaning-pos">{part.label}</span>}

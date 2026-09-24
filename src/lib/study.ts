@@ -11,6 +11,7 @@ export function normalizeWord(value: string) {
 }
 
 export function isLearnedCard(stored?: StoredCard) {
+  if (stored?.pendingDictation) return false
   return Boolean(stored?.learnedAt || (stored?.card.reps ?? 0) > 0)
 }
 
@@ -130,9 +131,9 @@ export function pickWords(words: WordEntry[], cards: Map<string, StoredCard>, co
   const recentCutoff = now - 3 * 24 * 60 * 60 * 1000
   const due = words.filter((word) => {
     const card = cards.get(word.id)
-    return isLearnedCard(card) && new Date(card!.card.due).getTime() <= now
+    return Boolean(card?.pendingDictation) || (isLearnedCard(card) && new Date(card!.card.due).getTime() <= now)
   })
-  const unseen = words.filter((word) => !isLearnedCard(cards.get(word.id)))
+  const unseen = words.filter((word) => !cards.get(word.id)?.pendingDictation && !isLearnedCard(cards.get(word.id)))
   const weak = words.filter((word) => {
     const card = cards.get(word.id)
     return isLearnedCard(card) && new Date(card!.card.due).getTime() > now && ((card!.card.difficulty ?? 0) >= 7 || (card!.forgetCount ?? 0) > 0 || (card!.fuzzyCount ?? 0) > 0 || (card!.spellingErrorCount ?? 0) > 0 || card!.important || card!.confusing)
@@ -151,10 +152,9 @@ export function pickWords(words: WordEntry[], cards: Map<string, StoredCard>, co
   })
   let ordered: WordEntry[]
   if (mode === 'daily') {
-    ordered = [...shuffle(due), ...shuffle(unseen).slice(0, count)]
+    ordered = shuffle(unseen).slice(0, count)
   } else if (mode === 'due') {
-    const weakFirst = weak.sort((a, b) => (cards.get(b.id)?.card.difficulty ?? 0) - (cards.get(a.id)?.card.difficulty ?? 0))
-    ordered = [...shuffle(due), ...weakFirst, ...shuffle(old), ...shuffle(unseen), ...shuffle(recent)]
+    ordered = shuffle(due)
   } else if (mode === 'weak') {
     const weakFirst = weak.sort((a, b) => (cards.get(b.id)?.card.difficulty ?? 0) - (cards.get(a.id)?.card.difficulty ?? 0))
     ordered = [...shuffle(due), ...weakFirst, ...shuffle(old), ...shuffle(unseen), ...shuffle(recent)]
@@ -164,16 +164,16 @@ export function pickWords(words: WordEntry[], cards: Map<string, StoredCard>, co
     ordered = [...shuffle(due), ...weakFirst, ...shuffle(unseen), ...shuffle(old), ...recentWords]
   }
   const unique = [...new Map(ordered.map((word) => [word.id, word])).values()]
-  return mode === 'daily' ? unique : unique.slice(0, count)
+  return unique.slice(0, count)
 }
 
 export function dailyPlan(words: WordEntry[], cards: Map<string, StoredCard>, newWordTarget: number) {
   const now = Date.now()
   const due = words.filter((word) => {
     const card = cards.get(word.id)
-    return isLearnedCard(card) && new Date(card!.card.due).getTime() <= now
+    return Boolean(card?.pendingDictation) || (isLearnedCard(card) && new Date(card!.card.due).getTime() <= now)
   })
-  const unseen = words.filter((word) => !isLearnedCard(cards.get(word.id)))
+  const unseen = words.filter((word) => !cards.get(word.id)?.pendingDictation && !isLearnedCard(cards.get(word.id)))
   return {
     dueCount: due.length,
     availableNewCount: unseen.length,

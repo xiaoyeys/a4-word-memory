@@ -4,7 +4,8 @@ export type LibraryKind = 'builtin' | 'custom'
 export type StudyMode = 'daily' | 'random' | 'weak' | 'due'
 export type PlacementMode = 'manual' | 'auto'
 export type RecallRating = 'remembered' | 'fuzzy' | 'forgotten'
-export type StudyStage = 'learn' | 'spell' | 'place' | 'recall' | 'relearn' | 'complete'
+export type StudyMethod = 'scatter' | 'match' | 'dictation'
+export type StudyStage = 'learn' | 'spell' | 'place' | 'recall' | 'relearn' | 'match' | 'dictation' | 'quick-review' | 'complete'
 
 export interface WordEntry {
   id: string
@@ -39,6 +40,7 @@ export interface StoredCard {
   important?: boolean
   confusing?: boolean
   favorite?: boolean
+  pendingDictation?: boolean
 }
 
 export interface PlacedWord {
@@ -58,6 +60,7 @@ export interface RecallEvent {
   rating: RecallRating
   round: number
   createdAt: string
+  method?: StudyMethod
 }
 
 export interface SessionMetrics {
@@ -68,11 +71,49 @@ export interface SessionMetrics {
   sequenceAids: number
 }
 
+export interface MethodProgress {
+  matchOrder?: string[]
+  matchedWordIds?: string[]
+  matchErrors?: Record<string, number>
+  matchSelectedWordId?: string
+  matchSelectedSide?: 'word' | 'meaning'
+  matchMeaningOrder?: string[]
+  matchDirection?: 'en-zh' | 'zh-en'
+  matchGroupIndex?: number
+  dictationOrder?: string[]
+  dictationQueue?: string[]
+  dictationAttemptedWordIds?: string[]
+  dictationBatchWordIds?: string[]
+  dictationAnswers?: Record<string, string>
+  dictationCorrectWordIds?: string[]
+  dictationGradeCorrectIds?: string[]
+  dictationOverrides?: Record<string, boolean>
+  dictationErrors?: Record<string, number>
+  dictationConfirmedWordIds?: string[]
+  dictationIndex?: number
+  dictationMeaningTest?: boolean
+  dictationRoundComplete?: boolean
+}
+
 export interface StudySession {
   id: string
   libraryId: string
   libraryName: string
   mode: StudyMode
+  methods?: StudyMethod[]
+  methodIndex?: number
+  methodProgress?: MethodProgress
+  methodEvents?: RecallEvent[]
+  methodGroupSize?: number
+  dictationGroupSize?: number
+  randomSpellCheck?: boolean
+  scatterRepetitions?: number
+  scatterRecallBatchSize?: number
+  unmasteredWordIds?: string[]
+  reviewQueue?: string[]
+  reviewIndex?: number
+  reviewAttempts?: Record<string, number>
+  reviewFirstRatings?: Record<string, RecallRating>
   placementMode: PlacementMode
   targetCount: number
   wordIds: string[]
@@ -132,6 +173,11 @@ export interface MemoryPaper {
   finalMasteryRate: number
   createdAt: string
   updatedAt: string
+  methods?: StudyMethod[]
+  methodEvents?: RecallEvent[]
+  methodProgress?: MethodProgress
+  unmasteredWordIds?: string[]
+  mode?: StudyMode
 }
 
 export interface AppSettings {
@@ -158,6 +204,12 @@ export interface AppSettings {
   reminderEnabled: boolean
   reminderTime: string
   showStudyHints: boolean
+  lastStudyMethods?: StudyMethod[]
+  lastMethodGroupSize?: number
+  lastDictationGroupSize?: number
+  lastRandomSpellCheck?: boolean
+  lastScatterRepetitions?: number
+  lastScatterRecallBatchSize?: number
 }
 
 export interface SessionSummary {

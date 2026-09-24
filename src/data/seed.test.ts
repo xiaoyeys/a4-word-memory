@@ -3,6 +3,12 @@ import type { WordEntry } from '../types'
 import { builtinLibraries, convertVocabularyWords } from './seed'
 
 describe('bundled vocabularies', () => {
+  it('includes the school-stage libraries', () => {
+    expect(builtinLibraries.find((library) => library.id === 'builtin-primary')).toMatchObject({ fileName: 'primary.json', wordCount: 505 })
+    expect(builtinLibraries.find((library) => library.id === 'builtin-zhongkao')).toMatchObject({ fileName: 'zhongkao.json', wordCount: 1603 })
+    expect(builtinLibraries.find((library) => library.id === 'builtin-gaokao')).toMatchObject({ fileName: 'gaokao.json', wordCount: 3677 })
+  })
+
   it('converts translations and keeps a matching legacy id', () => {
     const base = builtinLibraries[0]
     const library = { ...base, wordCount: 2 }

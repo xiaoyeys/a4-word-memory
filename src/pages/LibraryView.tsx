@@ -10,14 +10,18 @@ interface LibraryViewProps {
   libraries: WordLibrary[]
   words: WordEntry[]
   currentLibraryId?: string
+  loadingLibraryId?: string
   onSelect: (libraryId: string) => Promise<void>
   onChanged: () => Promise<void>
 }
 
-const categories = ['全部', '四级', '六级', '考研', 'IELTS', 'TOEFL', '其他', '自定义'] as const
+const categories = ['全部', '小学', '中考', '高考', '四级', '六级', '考研', 'IELTS', 'TOEFL', '其他', '自定义'] as const
 
 function libraryCategory(library: WordLibrary) {
   if (library.kind === 'custom') return '自定义'
+  if (library.name.includes('小学')) return '小学'
+  if (library.name.includes('中考')) return '中考'
+  if (library.name.includes('高考')) return '高考'
   if (library.name.includes('CET-4')) return '四级'
   if (library.name.includes('CET-6')) return '六级'
   if (library.name.includes('考研')) return '考研'
@@ -26,7 +30,7 @@ function libraryCategory(library: WordLibrary) {
   return '其他'
 }
 
-export function LibraryView({ libraries, words, currentLibraryId, onSelect, onChanged }: LibraryViewProps) {
+export function LibraryView({ libraries, words, currentLibraryId, loadingLibraryId, onSelect, onChanged }: LibraryViewProps) {
   const [selectedId, setSelectedId] = useState(currentLibraryId ?? libraries[0]?.id)
   const [search, setSearch] = useState('')
   const [bookSearch, setBookSearch] = useState('')
@@ -145,20 +149,27 @@ export function LibraryView({ libraries, words, currentLibraryId, onSelect, onCh
     await onChanged()
   }
 
+  function chooseCategory(nextCategory: (typeof categories)[number]) {
+    setCategory(nextCategory)
+    const firstMatch = libraries.find((library) => (nextCategory === '全部' || libraryCategory(library) === nextCategory) && (!bookSearch || library.name.toLowerCase().includes(bookSearch.toLowerCase())))
+    if (firstMatch) setSelectedId(firstMatch.id)
+  }
+
   const importColumns = rawRecords[0] ? Object.keys(rawRecords[0]) : []
   const needsMapping = importColumns.length > 0 && !preview.some((row) => row.status === 'valid')
 
   return <div className="page-content book-picker-page">
     <div className="page-heading split-heading">
-      <div><p className="eyebrow">当前只专注一本</p><h1>更换词书</h1><p>选择后，首页计划和统计都会切换到这本词书。</p></div>
+      <div><p className="eyebrow">调整计划 · 当前只专注一本</p><h1>选择计划词书</h1><p>选择后返回计划设置；首页、复习和统计都只使用这一本词书。</p></div>
       <button className="secondary" onClick={() => setShowImport(true)}><FileUp size={18} />导入自定义词书</button>
     </div>
-    <section className="book-picker-tools"><label className="search-box"><Search size={17} /><input value={bookSearch} onChange={(event) => setBookSearch(event.target.value)} placeholder="搜索词书" /></label><div className="book-categories">{categories.map((item) => <button key={item} className={category === item ? 'active' : ''} onClick={() => setCategory(item)}>{item}</button>)}</div></section>
+    <section className="book-picker-tools"><label className="search-box"><Search size={17} /><input value={bookSearch} onChange={(event) => setBookSearch(event.target.value)} placeholder="搜索词书" /></label><div className="book-categories">{categories.map((item) => <button key={item} className={category === item ? 'active' : ''} onClick={() => chooseCategory(item)}>{item}</button>)}</div></section>
     <section className="book-grid">{visibleLibraries.map((library) => {
       const active = library.id === currentLibraryId
-      return <button key={library.id} className={active ? 'book-option active' : 'book-option'} onClick={() => void onSelect(library.id)}><span className={`book-cover small-cover category-${libraryCategory(library).toLowerCase()}`}><span>{library.name.split(' ')[0]}</span><small>{library.kind === 'custom' ? '我的词书' : library.name.split(' ').slice(1).join(' ')}</small></span><span className="book-option-copy"><strong>{library.name}</strong><small>{library.wordCount} 词 · {library.kind === 'builtin' ? '内置词书' : '自定义词书'}</small></span>{active && <CheckCircle2 />}</button>
+      const downloaded = library.kind === 'custom' || words.some((word) => word.libraryId === library.id)
+      return <button key={library.id} disabled={Boolean(loadingLibraryId)} className={active ? 'book-option active' : 'book-option'} onClick={() => void onSelect(library.id)}><span className={`book-cover small-cover category-${libraryCategory(library).toLowerCase()}`}><span>{library.name.split(' ')[0]}</span><small>{library.kind === 'custom' ? '我的词书' : library.name.split(' ').slice(1).join(' ')}</small></span><span className="book-option-copy"><strong>{library.name}</strong><small>{library.wordCount} 词 · {library.kind === 'builtin' ? (downloaded ? '已保存到本机' : '选择后加载') : '自定义词书'}</small></span>{active && <CheckCircle2 />}</button>
     })}{!visibleLibraries.length && <div className="empty-state compact">没有匹配的词书</div>}</section>
-    <div className="library-manage-heading"><div><span className="section-kicker"><LibraryBig size={16} />词条预览与管理</span><h2>{selected?.name}</h2></div>{currentLibraryId !== selected?.id && selected && <button className="secondary" onClick={() => void onSelect(selected.id)}>设为当前词书</button>}</div>
+    <div className="library-manage-heading"><div><span className="section-kicker"><LibraryBig size={16} />词条预览与管理</span><h2>{selected?.name}</h2></div>{currentLibraryId !== selected?.id && selected && <button className="secondary" onClick={() => void onSelect(selected.id)}>设为计划词书</button>}</div>
     <div className="library-layout">
       <aside className="library-list">
         {libraries.map((library) => <button key={library.id} className={selected?.id === library.id ? 'library-tab active' : 'library-tab'} onClick={() => setSelectedId(library.id)}>
@@ -174,7 +185,7 @@ export function LibraryView({ libraries, words, currentLibraryId, onSelect, onCh
         <div className="word-table">
           <div className="word-row table-head"><span>单词</span><span>词性与释义</span><span></span></div>
           {visibleWords.slice(0, 300).map((word) => <div className="word-row" key={word.id}><span><strong>{word.word}</strong><small>{word.phonetic}</small></span><span><small>{formatPartOfSpeech(word.partOfSpeech)}</small>{word.meaning}</span><span>{selected.kind === 'custom' && <><button className="icon-button" onClick={() => setEditing(word)} aria-label="编辑"><Pencil /></button><button className="icon-button danger" onClick={() => deleteWord(word)} aria-label="删除"><Trash2 /></button></>}</span></div>)}
-          {!visibleWords.length && <div className="empty-state compact">没有匹配的单词</div>}
+          {!visibleWords.length && <div className="empty-state compact">{selected.kind === 'builtin' && !words.some((word) => word.libraryId === selected.id) ? '这本词书尚未加载，设为计划词书后即可预览词条。' : '没有匹配的单词'}</div>}
         </div>
       </section>}
     </div>

@@ -33,7 +33,8 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,json}']
+        // Vocabulary JSON is fetched only after the user chooses a study book.
+        globPatterns: ['**/*.{js,css,html,svg}']
       }
     })
   ]

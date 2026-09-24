@@ -15,6 +15,7 @@ export function paperId(sessionId: string) {
 export function defaultPaperTitle(session: StudySession) {
   const date = new Date(session.completedAt ?? session.updatedAt)
   const day = Number.isFinite(date.getTime()) ? date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' }) : '历史学习'
+  if (session.mode === 'due') return `${day} · 复习错词 ${session.placed.length}词`
   return `${day} · ${session.wordIds.length}词`
 }
 
@@ -38,10 +39,11 @@ export function buildArchiveRecords(
     folders.push({ id, name: library.name, kind: 'library', libraryId: library.id, order: index, createdAt: now, updatedAt: now })
   })
 
-  sessions.filter((session) => session.status === 'completed' && session.completedAt && !paperSessions.has(session.id)).forEach((session) => {
+  sessions.filter((session) => session.status === 'completed' && session.completedAt && !paperSessions.has(session.id) && (session.mode !== 'due' || session.placed.length > 0)).forEach((session) => {
     const summary = summaryFor(session)
     const completedAt = session.completedAt!
-    const snapshots = session.wordIds.map((id) => wordsById.get(id)).filter((word): word is WordEntry => Boolean(word)).map((word) => ({
+    const snapshotWordIds = session.mode === 'due' ? [...new Set(session.placed.map((item) => item.wordId))] : session.wordIds
+    const snapshots = snapshotWordIds.map((id) => wordsById.get(id)).filter((word): word is WordEntry => Boolean(word)).map((word) => ({
       id: word.id,
       word: word.word,
       phonetic: word.phonetic,
@@ -65,6 +67,11 @@ export function buildArchiveRecords(
       finalMasteryRate: summary.finalMasteryRate,
       createdAt: now,
       updatedAt: now,
+      methods: session.methods,
+      methodEvents: session.methodEvents,
+      methodProgress: session.methodProgress,
+      unmasteredWordIds: session.unmasteredWordIds,
+      mode: session.mode,
     })
   })
 

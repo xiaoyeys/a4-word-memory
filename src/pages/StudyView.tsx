@@ -325,6 +325,32 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   }
 
   async function complete(next: StudySession) {
+    const nextIndex = (next.methodIndex ?? 0) + 1
+    const nextMethod = next.methods?.[nextIndex]
+    if (nextMethod) {
+      const checkpoint = {
+        ...next,
+        methodIndex: nextIndex,
+        stage: nextMethod === 'match' ? 'match' as const : nextMethod === 'dictation' ? 'dictation' as const : 'learn' as const,
+        currentWordIndex: 0,
+        repetitions: 0,
+        recallIndex: 0,
+        recallLimit: 0,
+        selectedRecallWordId: undefined,
+        revealedMeaning: false,
+        preview: undefined,
+        updatedAt: new Date().toISOString(),
+      }
+      try {
+        const saved = await savePartialSession(checkpointSession(checkpoint))
+        setSession(saved)
+        playFeedbackSound('finish', settings.soundEffects)
+        onFinish(saved)
+      } catch {
+        setMessage('本步骤已完成，但流程切换保存失败。请先不要关闭页面，并检查浏览器可用存储空间。')
+      }
+      return
+    }
     try {
       const finished = await finishSession(checkpointSession(next))
       playFeedbackSound('finish', settings.soundEffects)
@@ -353,13 +379,19 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   async function markRepetition() {
     playFeedbackSound('complete', settings.soundEffects)
     const repetitions = session.repetitions + 1
-    const repetitionTarget = Math.max(1, settings.repetitionsPerWord ?? 3)
+    const repetitionTarget = Math.max(1, session.scatterRepetitions ?? settings.repetitionsPerWord ?? 3)
     if (session.stage === 'relearn' && repetitions >= repetitionTarget) {
       await endRecallOrContinue({ ...session, repetitions: 0 })
       return
     }
     if (session.stage === 'learn' && repetitions >= repetitionTarget) {
-      await update({ ...session, repetitions: repetitionTarget, stage: 'spell' })
+      if (session.randomSpellCheck === false) {
+        const next = { ...session, repetitions: repetitionTarget, stage: 'place' as const }
+        if (session.placementMode === 'auto' && currentWord) await placeWord(next, findRandomPlacement(currentWord.word, session.placed, settings.fontScale))
+        else await update(next)
+      } else {
+        await update({ ...session, repetitions: repetitionTarget, stage: 'spell' })
+      }
       setSpelling('')
       return
     }
@@ -389,7 +421,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   async function revealAnswer(skip: boolean) {
     if (!currentWord) return
     playFeedbackSound(skip ? 'error' : 'complete', settings.soundEffects)
-    const repetitionTarget = Math.max(1, settings.repetitionsPerWord ?? 3)
+    const repetitionTarget = Math.max(1, session.scatterRepetitions ?? settings.repetitionsPerWord ?? 3)
     if (skip) {
       const currentIndex = session.currentWordIndex
       const remaining = session.wordIds.filter((_, index) => index !== currentIndex)
@@ -441,7 +473,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
     if (!currentWord) return
     playFeedbackSound('place', settings.soundEffects)
     const placed: PlacedWord[] = [...base.placed, { ...placement, wordId: currentWord.id, order: base.placed.length + 1 }]
-    const recallBatchSize = Math.max(1, settings.recallBatchSize ?? 3)
+    const recallBatchSize = Math.max(1, session.scatterRecallBatchSize ?? settings.recallBatchSize ?? 3)
     const shouldRecall = placed.length % recallBatchSize === 0 || placed.length === base.wordIds.length
     setCurrentPage(placement.page)
     if (isMobileViewport) setMobileSurface(shouldRecall ? 'paper' : 'card')
@@ -610,9 +642,9 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
             {settings.showMeaning && <MeaningDisplay meaning={word.meaning} partOfSpeech={settings.showPartOfSpeech ? word.partOfSpeech : undefined} />}
             {session.repetitions > 0 && <p className="word-split-hint"><Lightbulb size={15} />按结构回忆：{splitWordForMemory(word.word)}</p>}
             <div className="repetition-dots" aria-label={`已完成${session.repetitions}遍`}>
-              {Array.from({ length: Math.max(1, settings.repetitionsPerWord ?? 3) }, (_, index) => index + 1).map((item) => <i key={item} className={item <= session.repetitions ? 'done' : ''} />)}
+              {Array.from({ length: Math.max(1, session.scatterRepetitions ?? settings.repetitionsPerWord ?? 3) }, (_, index) => index + 1).map((item) => <i key={item} className={item <= session.repetitions ? 'done' : ''} />)}
             </div>
-            <button className="primary wide" onClick={markRepetition}>完成第{Math.min(Math.max(1, settings.repetitionsPerWord ?? 3), session.repetitions + 1)}遍</button>
+            <button className="primary wide" onClick={markRepetition}>完成第{Math.min(Math.max(1, session.scatterRepetitions ?? settings.repetitionsPerWord ?? 3), session.repetitions + 1)}遍</button>
           </div>
         })()}
 

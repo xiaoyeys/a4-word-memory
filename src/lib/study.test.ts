@@ -42,11 +42,17 @@ describe('study rules', () => {
     expect(pickWords(words, cards, 2, 'random', false).map((item) => item.id).sort()).toEqual(['new-a', 'new-b'])
   })
 
-  it('always schedules due words before new words', () => {
-    const words = ['new-a', 'due', 'new-b'].map(word)
+  it('keeps the new-word entry separate from due review', () => {
+    const words = ['new-a', 'due', 'future', 'new-b'].map(word)
     const dueCard = createEmptyCard(new Date(Date.now() - 86400000))
-    const cards = new Map<string, StoredCard>([['due', { wordId: 'due', card: dueCard, learnedAt: new Date(Date.now() - 5 * 86400000).toISOString(), lastStudiedAt: new Date(Date.now() - 5 * 86400000).toISOString() }]])
+    const futureCard = createEmptyCard(new Date(Date.now() + 86400000))
+    const cards = new Map<string, StoredCard>([
+      ['due', { wordId: 'due', card: dueCard, learnedAt: new Date(Date.now() - 5 * 86400000).toISOString(), lastStudiedAt: new Date(Date.now() - 5 * 86400000).toISOString() }],
+      ['future', { wordId: 'future', card: futureCard, learnedAt: new Date(Date.now() - 5 * 86400000).toISOString(), lastStudiedAt: new Date(Date.now() - 5 * 86400000).toISOString() }],
+    ])
     expect(pickWords(words, cards, 1, 'random', false).map((item) => item.id)).toEqual(['due'])
+    expect(pickWords(words, cards, 4, 'daily', false).map((item) => item.id).sort()).toEqual(['new-a', 'new-b'])
+    expect(pickWords(words, cards, 4, 'due', false).map((item) => item.id)).toEqual(['due'])
   })
 
   it('builds a daily plan from all due words plus the fixed new-word target', () => {
@@ -54,8 +60,8 @@ describe('study rules', () => {
     const dueCard = createEmptyCard(new Date(Date.now() - 86400000))
     const cards = new Map<string, StoredCard>([['due', { wordId: 'due', card: dueCard, learnedAt: '2026-09-20T10:00:00.000Z' }]])
     expect(dailyPlan(words, cards, 1)).toEqual({ dueCount: 1, availableNewCount: 2, newCount: 1, totalCount: 2 })
-    expect(pickWords(words, cards, 1, 'daily', false).map((item) => item.id)).toContain('due')
-    expect(pickWords(words, cards, 1, 'daily', false)).toHaveLength(2)
+    expect(pickWords(words, cards, 1, 'daily', false).map((item) => item.id)).not.toContain('due')
+    expect(pickWords(words, cards, 1, 'daily', false)).toHaveLength(1)
   })
 
   it('does not count a favorite-only empty card as learned', () => {
