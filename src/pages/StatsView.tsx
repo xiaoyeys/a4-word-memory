@@ -1,7 +1,7 @@
 import { AlertTriangle, BookOpen, CalendarDays, CheckCircle2, Flag, Heart, Search, Target, TrendingUp, X } from 'lucide-react'
 import { useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { classifyCard, summaryFor } from '../lib/study'
+import { classifyCard, isLearnedCard, summaryFor } from '../lib/study'
 import { formatPartOfSpeech } from '../components/MeaningDisplay'
 import { db } from '../db'
 import type { StoredCard, StudySession, WordEntry, WordLibrary } from '../types'
@@ -36,7 +36,7 @@ export function StatsView({ sessions, cards, words, library, onChangeLibrary, on
   const librarySessions = sessions.filter((session) => session.libraryId === library?.id)
   const completed = librarySessions.filter((session) => session.status === 'completed' && session.completedAt)
   const summaries = completed.map((session) => ({ session, summary: summaryFor(session) }))
-  const learnedWords = libraryWords.filter((word) => cardMap.has(word.id))
+  const learnedWords = libraryWords.filter((word) => isLearnedCard(cardMap.get(word.id)))
   const dueCount = learnedWords.filter((word) => new Date(cardMap.get(word.id)!.card.due) <= new Date()).length
   const allWeakWords = learnedWords.filter((word) => {
     const card = cardMap.get(word.id)!

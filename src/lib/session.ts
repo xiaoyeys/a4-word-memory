@@ -1,7 +1,7 @@
 import { db } from '../db'
 import { createEmptyCard } from 'ts-fsrs'
 import type { PlacementMode, StudyMode, StudySession, WordEntry, WordLibrary } from '../types'
-import { aggregateRating, pickWords, scheduleCard } from './study'
+import { aggregateRating, isLearnedCard, pickWords, scheduleCard } from './study'
 
 export async function createStudySession(options: {
   library: WordLibrary
@@ -14,7 +14,7 @@ export async function createStudySession(options: {
   const storedCards = await db.cards.bulkGet(options.words.map((word) => word.id))
   const cards = new Map(storedCards.filter(Boolean).map((card) => [card!.wordId, card!]))
   const selected = pickWords(options.words, cards, options.count, options.mode, options.allowRecent)
-  const newWordIds = selected.filter((word) => !cards.has(word.id)).map((word) => word.id)
+  const newWordIds = selected.filter((word) => !isLearnedCard(cards.get(word.id))).map((word) => word.id)
   const now = new Date().toISOString()
   const session: StudySession = {
     id: crypto.randomUUID(),
@@ -61,6 +61,7 @@ export async function finishSession(session: StudySession) {
       scheduled.important = stored?.important ?? false
       scheduled.confusing = stored?.confusing ?? false
       scheduled.favorite = stored?.favorite ?? false
+      scheduled.learnedAt = stored?.learnedAt ?? (events.length ? completed.completedAt : undefined)
       await db.cards.put(scheduled)
     }
   })
@@ -70,20 +71,17 @@ export async function finishSession(session: StudySession) {
 /** Persist words genuinely encountered so far without advancing their FSRS schedule. */
 export async function savePartialSession(session: StudySession) {
   const now = new Date().toISOString()
-  const currentWordId = session.wordIds[session.currentWordIndex]
-  const touchedIds = new Set([
-    ...session.placed.map((item) => item.wordId),
-    ...session.events.map((event) => event.wordId),
-    ...(session.spellingErrorWordIds ?? []),
-    ...session.spellingForgottenWordIds,
-    ...(session.repetitions > 0 || ['spell', 'place', 'relearn'].includes(session.stage) ? [currentWordId] : []),
-  ].filter((id): id is string => Boolean(id)))
+  const touchedIds = new Set(session.events.map((event) => event.wordId))
   const checkpoint = { ...session, updatedAt: now }
   await db.transaction('rw', db.sessions, db.cards, async () => {
     await db.sessions.put(checkpoint)
     for (const wordId of touchedIds) {
-      if (await db.cards.get(wordId)) continue
-      await db.cards.put({ wordId, card: createEmptyCard(new Date()), lastStudiedAt: now })
+      const stored = await db.cards.get(wordId)
+      if (stored) {
+        await db.cards.update(wordId, { lastStudiedAt: now, learnedAt: stored.learnedAt ?? now })
+      } else {
+        await db.cards.put({ wordId, card: createEmptyCard(new Date()), lastStudiedAt: now, learnedAt: now })
+      }
     }
   })
   return checkpoint

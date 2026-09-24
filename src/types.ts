@@ -32,6 +32,7 @@ export interface StoredCard {
   wordId: string
   card: Card
   lastStudiedAt?: string
+  learnedAt?: string
   forgetCount?: number
   fuzzyCount?: number
   spellingErrorCount?: number

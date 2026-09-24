@@ -1,5 +1,5 @@
 import { ArrowRight, BookOpen, CalendarDays, CheckCircle2, Clock3, Flame, Play, RefreshCw, Sparkles, Target } from 'lucide-react'
-import { dailyPlan } from '../lib/study'
+import { dailyPlan, isLearnedCard } from '../lib/study'
 import { completedDaySet, dayKey, monthCalendar, nextSevenDaysDue, studyStreak } from '../lib/checkin'
 import type { AppSettings, StoredCard, StudySession, WordEntry, WordLibrary } from '../types'
 
@@ -30,7 +30,7 @@ export function HomeView(props: {
   const remainingNewTarget = Math.max(0, props.settings.dailyNewWordTarget - todayNewIds.size)
   const plan = dailyPlan(libraryWords, cardMap, remainingNewTarget)
   const totalToday = todayWordIds.size + plan.totalCount
-  const learned = libraryWords.filter((word) => cardMap.has(word.id)).length
+  const learned = libraryWords.filter((word) => isLearnedCard(cardMap.get(word.id))).length
   const progress = library?.wordCount ? Math.round(learned / library.wordCount * 100) : 0
   const streak = studyStreak(completed, library?.id)
   const weekStart = new Date(); weekStart.setHours(0, 0, 0, 0); weekStart.setDate(weekStart.getDate() - 6)

@@ -10,6 +10,10 @@ export function normalizeWord(value: string) {
   return value.trim().toLocaleLowerCase('en-US')
 }
 
+export function isLearnedCard(stored?: StoredCard) {
+  return Boolean(stored?.learnedAt || (stored?.card.reps ?? 0) > 0)
+}
+
 export function shuffle<T>(items: T[]) {
   const result = [...items]
   for (let index = result.length - 1; index > 0; index -= 1) {
@@ -126,16 +130,16 @@ export function pickWords(words: WordEntry[], cards: Map<string, StoredCard>, co
   const recentCutoff = now - 3 * 24 * 60 * 60 * 1000
   const due = words.filter((word) => {
     const card = cards.get(word.id)
-    return card && new Date(card.card.due).getTime() <= now
+    return isLearnedCard(card) && new Date(card!.card.due).getTime() <= now
   })
-  const unseen = words.filter((word) => !cards.has(word.id))
+  const unseen = words.filter((word) => !isLearnedCard(cards.get(word.id)))
   const weak = words.filter((word) => {
     const card = cards.get(word.id)
-    return card && new Date(card.card.due).getTime() > now && ((card.card.difficulty ?? 0) >= 7 || (card.forgetCount ?? 0) > 0 || (card.fuzzyCount ?? 0) > 0 || (card.spellingErrorCount ?? 0) > 0 || card.important || card.confusing)
+    return isLearnedCard(card) && new Date(card!.card.due).getTime() > now && ((card!.card.difficulty ?? 0) >= 7 || (card!.forgetCount ?? 0) > 0 || (card!.fuzzyCount ?? 0) > 0 || (card!.spellingErrorCount ?? 0) > 0 || card!.important || card!.confusing)
   })
   const learned = words.filter((word) => {
     const card = cards.get(word.id)
-    return card && new Date(card.card.due).getTime() > now && (card.card.difficulty ?? 0) < 7
+    return isLearnedCard(card) && new Date(card!.card.due).getTime() > now && (card!.card.difficulty ?? 0) < 7
   })
   const old = learned.filter((word) => {
     const card = cards.get(word.id)
@@ -167,9 +171,9 @@ export function dailyPlan(words: WordEntry[], cards: Map<string, StoredCard>, ne
   const now = Date.now()
   const due = words.filter((word) => {
     const card = cards.get(word.id)
-    return card && new Date(card.card.due).getTime() <= now
+    return isLearnedCard(card) && new Date(card!.card.due).getTime() <= now
   })
-  const unseen = words.filter((word) => !cards.has(word.id))
+  const unseen = words.filter((word) => !isLearnedCard(cards.get(word.id)))
   return {
     dueCount: due.length,
     availableNewCount: unseen.length,

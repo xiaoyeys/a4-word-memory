@@ -48,6 +48,10 @@ function wordMemoryParts(word: string) {
   ]
 }
 
+function splitWordForMemory(word: string) {
+  return wordMemoryParts(word).map((part) => part.text).join('·')
+}
+
 function formatElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60)
   const remaining = seconds % 60
@@ -302,8 +306,8 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   async function update(next: StudySession) {
     const value = { ...checkpointSession(next), updatedAt: new Date().toISOString() }
     try {
-      await db.sessions.put(value)
-      setSession(value)
+      const saved = await savePartialSession(value)
+      setSession(saved)
     } catch {
       setMessage('学习进度保存失败，可能是本地存储空间不足。请先导出备份并释放浏览器空间。')
     }
@@ -600,12 +604,11 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
 
         {(session.stage === 'learn' || session.stage === 'relearn') && (session.stage === 'relearn' ? relearnWord : currentWord) && (() => {
           const word = session.stage === 'relearn' ? relearnWord! : currentWord!
-          const parts = wordMemoryParts(word.word)
           return <div className="word-study">
-            <div className="word-title-row"><button className="word-title" onClick={() => playWord(word.word)}>{word.word}<Volume2 size={19} /></button><button className={favoriteWordIds.has(word.id) ? 'word-favorite active' : 'word-favorite'} onClick={() => void toggleFavorite(word.id)} aria-label={favoriteWordIds.has(word.id) ? '取消收藏单词' : '收藏单词'} title={favoriteWordIds.has(word.id) ? '取消收藏' : '收藏'}><Heart /></button></div>
+            <div className="word-title-row"><button className="word-title" onClick={() => playWord(word.word)}>{session.repetitions > 0 ? splitWordForMemory(word.word) : word.word}<Volume2 size={19} /></button><button className={favoriteWordIds.has(word.id) ? 'word-favorite active' : 'word-favorite'} onClick={() => void toggleFavorite(word.id)} aria-label={favoriteWordIds.has(word.id) ? '取消收藏单词' : '收藏单词'} title={favoriteWordIds.has(word.id) ? '取消收藏' : '收藏'}><Heart /></button></div>
             {settings.showPhonetic && <p className="phonetic">{word.phonetic || '暂无音标'}</p>}
             {settings.showMeaning && <MeaningDisplay meaning={word.meaning} partOfSpeech={settings.showPartOfSpeech ? word.partOfSpeech : undefined} />}
-            <details className="word-memory-help"><summary><Lightbulb size={15} />拆分记忆与词根词缀</summary><div className="word-parts">{parts.map((part) => <span key={`${part.label}-${part.text}`}><strong>{part.text}</strong><small>{part.label}</small></span>)}</div><p>把单词拆成可识别的部分，先记结构，再回忆完整拼写。</p></details>
+            {session.repetitions > 0 && <p className="word-split-hint"><Lightbulb size={15} />按结构回忆：{splitWordForMemory(word.word)}</p>}
             <div className="repetition-dots" aria-label={`已完成${session.repetitions}遍`}>
               {Array.from({ length: Math.max(1, settings.repetitionsPerWord ?? 3) }, (_, index) => index + 1).map((item) => <i key={item} className={item <= session.repetitions ? 'done' : ''} />)}
             </div>
