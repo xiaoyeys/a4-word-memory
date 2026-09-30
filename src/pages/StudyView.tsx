@@ -289,7 +289,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
       : session.stage === 'relearn' ? relearnWord
         : session.stage === 'recall' && session.selectedRecallWordId ? recallWord
           : undefined
-    if (visibleWord) playWord(visibleWord.word)
+    if (visibleWord && session.stage !== 'recall') playWord(visibleWord.word)
   }
 
   useEffect(() => {
@@ -497,7 +497,6 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
       return
     }
     setMessage('先在心里回忆释义，再显示答案')
-    playWord(wordsById.get(item.wordId)?.word ?? '')
     if (isMobileViewport) setMobileSurface('card')
     await update({ ...session, selectedRecallWordId: item.wordId, revealedMeaning: false })
   }
