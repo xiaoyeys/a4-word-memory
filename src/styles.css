@@ -669,6 +669,8 @@ input[type="checkbox"] { width: 42px; height: 22px; accent-color: var(--green); 
 .dictation-answer.is-obscured { background: rgba(244,242,234,.72); }
 .dictation-answer.is-obscured strong { filter: blur(10px); opacity: .55; user-select: none; }
 .dictation-pending { color: #b8bbb5; font-size: .68rem; text-align: center; }
+.completed-answer { justify-content: center; color: var(--ink); font-size: .78rem; line-height: 1.45; overflow-wrap: anywhere; text-align: center; }
+.completed-dictation-workspace { width: 100%; margin-top: 18px; }
 .dictation-error-cell { justify-content: center; color: #b6493e; font-family: Georgia,serif; font-size: .83rem; text-align: center; }
 .dictation-error-cell span { color: #b8bbb5; font-family: Inter,sans-serif; }
 .dictation-error-cell small { display: block; margin-top: 3px; color: #a23e32; font-family: Inter,sans-serif; font-size: .58rem; }
@@ -688,6 +690,8 @@ input[type="checkbox"] { width: 42px; height: 22px; accent-color: var(--green); 
 .dictation-finish > svg { color: var(--green); width: 34px; height: 34px; }
 .dictation-finish .method-action-row { justify-content: center; }
 .archive-method-summary { min-height: 0; overflow-y: auto; padding: clamp(22px,5vw,60px); background: repeating-linear-gradient(#fffefb 0 35px,#e9e6dc 36px); }
+.archive-completed-dictation { min-width: 0; min-height: 0; overflow: auto; padding: clamp(14px,3vw,30px); background: #f2efe7; }
+.archive-completed-dictation .completed-dictation-workspace { margin-top: 0; }
 .archive-method-view { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; }
 .archive-method-view > .paper-workspace { min-height: 0; }
 .archive-method-tabs { display: flex; gap: 5px; overflow-x: auto; padding: 7px 10px; border-bottom: 1px solid var(--line); background: #fffefb; }

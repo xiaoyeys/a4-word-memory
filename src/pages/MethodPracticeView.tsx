@@ -6,6 +6,7 @@ import { finishSession, savePartialSession } from '../lib/session'
 import { normalizeWord } from '../lib/study'
 import { playOnlinePronunciation } from '../lib/pronunciation'
 import type { AppSettings, MethodProgress, RecallEvent, StudyMethod, StudySession, WordEntry } from '../types'
+import { CompletedDictationPaper } from '../components/CompletedDictationPaper'
 import { MeaningDisplay, splitMeaning } from '../components/MeaningDisplay'
 
 interface Props {
@@ -44,6 +45,8 @@ function meaningAnswerMatches(word: WordEntry, answer: string) {
 export function MethodPracticeView({ initial, words, settings, onFinish, onExit }: Props) {
   const [session, setSession] = useState(initial)
   const [showDictationCover, setShowDictationCover] = useState(true)
+  const [showCompletedPaper, setShowCompletedPaper] = useState(false)
+  const [dictationDrafts, setDictationDrafts] = useState<Record<string, string>>({})
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 700)
   const [message, setMessage] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -69,6 +72,7 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
   const dictationPhase: DictationPhase = progress.dictationPhase ?? 3
   const phaseKey = String(dictationPhase)
   const phaseAnswers = dictationPhase === 3 ? (progress.dictationAnswers ?? {}) : dictationPhase === 4 ? (progress.dictationMeaningAnswers ?? {}) : dictationPhase === 5 ? (progress.dictationSecondWordAnswers ?? {}) : (progress.dictationSecondMeaningAnswers ?? {})
+  const currentAnswerField = dictationPhase === 3 ? 'dictationAnswers' : dictationPhase === 4 ? 'dictationMeaningAnswers' : dictationPhase === 5 ? 'dictationSecondWordAnswers' : 'dictationSecondMeaningAnswers'
   const phaseIsWord = dictationPhase === 3 || dictationPhase === 5
   const phaseAnswerLabel = dictationPhase === 3 ? '第一次默写单词' : dictationPhase === 4 ? '第一次默写释义' : dictationPhase === 5 ? '第二次默写单词' : '第二次默写释义'
   const answersByPhase: Record<string, Record<string, string>> = {
@@ -106,6 +110,10 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
     return () => window.clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    setDictationDrafts({ ...phaseAnswers })
+  }, [dictationPhase, progress.dictationIndex, session.id])
+
   async function persist(next: StudySession) {
     const value = checkpoint(next)
     await savePartialSession(value)
@@ -113,7 +121,10 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
   }
 
   async function leave() {
-    try { await persist(session); onExit() } catch { setMessage('保存失败，请检查浏览器存储空间后重试。') }
+    const next = currentMethod === 'dictation'
+      ? { ...session, methodProgress: { ...progress, [currentAnswerField]: { ...phaseAnswers, ...dictationDrafts } } }
+      : session
+    try { await persist(next); onExit() } catch { setMessage('保存失败，请检查浏览器存储空间后重试。') }
   }
 
   async function advanceMethod(nextProgress: MethodProgress, generatedEvents: RecallEvent[], unresolved: string[] = []) {
@@ -187,16 +198,17 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
   }
 
   async function submitDictation() {
+    const submittedAnswers = { ...phaseAnswers, ...dictationDrafts }
     const gradeCorrect = activeBatch.filter((id) => {
       const word = wordsById.get(id)
       if (!word) return false
-      return phaseIsWord ? normalizeWord(phaseAnswers[id] ?? '') === word.normalizedWord : meaningAnswerMatches(word, phaseAnswers[id] ?? '')
+      return phaseIsWord ? normalizeWord(submittedAnswers[id] ?? '') === word.normalizedWord : meaningAnswerMatches(word, submittedAnswers[id] ?? '')
     })
     const phaseCorrect = { ...(progress.dictationPhaseCorrectIds ?? {}), [phaseKey]: gradeCorrect }
-    playFeedbackSound(gradeCorrect.length === currentBatch.length ? 'correct' : 'complete', settings.soundEffects)
+    playFeedbackSound(gradeCorrect.length === activeBatch.length ? 'correct' : 'complete', settings.soundEffects)
     if (dictationPhase < 6) {
       const nextPhase = (dictationPhase + 1) as DictationPhase
-      await persist({ ...session, methodProgress: { ...progress, dictationBatchWordIds: activeBatch, dictationPhase: nextPhase, dictationPhaseCorrectIds: phaseCorrect } })
+      await persist({ ...session, methodProgress: { ...progress, [currentAnswerField]: submittedAnswers, dictationBatchWordIds: activeBatch, dictationPhase: nextPhase, dictationPhaseCorrectIds: phaseCorrect } })
       setMessage(`${phaseAnswerLabel}完成：${gradeCorrect.length}/${activeBatch.length} 个词匹配`)
       return
     }
@@ -213,6 +225,15 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
     const missed = batchNow.filter((id) => !wasCorrect.has(id))
     const unattempted = session.wordIds.filter((id) => !attemptedNext.includes(id))
     const nextBatch = attemptedNext.length === session.wordIds.length ? [] : [...missed, ...unattempted].slice(0, groupSize)
+    const completedAnswers = { ...(progress.dictationCompletedAnswers ?? {}) }
+    batchNow.forEach((id) => {
+      completedAnswers[id] = {
+        firstWord: answersByPhase['3']?.[id] ?? '',
+        firstMeaning: answersByPhase['4']?.[id] ?? '',
+        secondWord: answersByPhase['5']?.[id] ?? '',
+        secondMeaning: submittedAnswers[id] ?? '',
+      }
+    })
     const nextProgress: MethodProgress = {
       ...progress,
       dictationAttemptedWordIds: attemptedNext,
@@ -223,6 +244,7 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
       dictationMeaningAnswers: {},
       dictationSecondWordAnswers: {},
       dictationSecondMeaningAnswers: {},
+      dictationCompletedAnswers: completedAnswers,
       dictationPhase: 3,
       dictationPhaseCorrectIds: {},
       dictationGradeCorrectIds: undefined,
@@ -266,6 +288,7 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
       nextProgress.dictationMeaningAnswers = {}
       nextProgress.dictationSecondWordAnswers = {}
       nextProgress.dictationSecondMeaningAnswers = {}
+      nextProgress.dictationCompletedAnswers = {}
       nextProgress.dictationPhase = 3
       nextProgress.dictationPhaseCorrectIds = {}
       nextProgress.dictationErrors = {}
@@ -314,7 +337,7 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
 
     {currentMethod === 'dictation' && <main className="method-paper dictation-method">
       <div className="method-heading"><p className="eyebrow">折叠默写 · 第 {(progress.dictationIndex ?? 0) + 1} 轮</p><h1>{phaseAnswerLabel}</h1><p>当前列完成后自动进入下一列；已完成的填写会保留在纸上，但会高模糊遮挡，避免直接看到答案。</p><button className="text-button" onClick={() => setShowDictationCover((current) => !current)} aria-pressed={showDictationCover}>{showDictationCover ? <><EyeOff size={15} />隐藏遮挡</> : <><Eye size={15} />显示遮挡</>}</button></div>
-        {!visibleBatch.length ? <section className="dictation-finish panel"><CheckCircle2 /><h2>{correctDictation.length}/{session.wordIds.length} 个词已完成四列默写</h2><p>未完成的词会保留在待复习区，你也可以再练错词。</p><div className="method-action-row"><button className="secondary" onClick={() => { const missed = session.wordIds.filter((id) => !correctDictation.includes(id)); void persist({ ...session, methodProgress: { ...progress, dictationRoundComplete: false, dictationBatchWordIds: missed.slice(0, groupSize), dictationQueue: missed, dictationAnswers: {}, dictationMeaningAnswers: {}, dictationSecondWordAnswers: {}, dictationSecondMeaningAnswers: {}, dictationPhase: 3, dictationPhaseCorrectIds: {}, dictationGradeCorrectIds: undefined, dictationOverrides: {} } }) }} disabled={!session.wordIds.some((id) => !correctDictation.includes(id))}><RotateCcw size={16} />再练错词</button><button className="primary" disabled={!allTried} onClick={() => void finishDictation(true)}>完成并保存待复习词</button></div>{!allTried && <small>继续练习，确保每个目标词至少完成四列默写。</small>}</section> : <>
+        {!visibleBatch.length ? <><section className="dictation-finish panel"><CheckCircle2 /><h2>{correctDictation.length}/{session.wordIds.length} 个词已完成四列默写</h2><p>现在可以解除遮挡查看完整 A4 纸；完成学习后，这张纸会自动进入学习档案。</p><div className="method-action-row"><button className="secondary" onClick={() => setShowCompletedPaper((current) => !current)}><Eye size={16} />{showCompletedPaper ? '收起完整纸面' : '查看完整 A4 纸'}</button><button className="secondary" onClick={() => { const missed = session.wordIds.filter((id) => !correctDictation.includes(id)); void persist({ ...session, methodProgress: { ...progress, dictationRoundComplete: false, dictationBatchWordIds: missed.slice(0, groupSize), dictationQueue: missed, dictationAnswers: {}, dictationMeaningAnswers: {}, dictationSecondWordAnswers: {}, dictationSecondMeaningAnswers: {}, dictationPhase: 3, dictationPhaseCorrectIds: {}, dictationGradeCorrectIds: undefined, dictationOverrides: {} } }) }} disabled={!session.wordIds.some((id) => !correctDictation.includes(id))}><RotateCcw size={16} />再练错词</button><button className="primary" disabled={!allTried} onClick={() => void finishDictation(true)}>完成并存入学习档案</button></div>{!allTried && <small>继续练习，确保每个目标词至少完成四列默写。</small>}</section>{showCompletedPaper && <CompletedDictationPaper wordIds={session.wordIds} wordsById={wordsById} progress={progress} />}</> : <>
         <div className="dictation-paper-workspace">
           <div className="dictation-paper" role="table" aria-label="六列折叠默写纸">
             <div className="dictation-column-head" role="row">
@@ -329,11 +352,11 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
               const word = wordsById.get(id)
               if (!word) return null
               const renderAnswerCell = (phase: DictationPhase, placeholder: string) => {
-                const answer = answersByPhase[String(phase)]?.[id] ?? ''
                 const completed = phase < dictationPhase
                 const active = phase === dictationPhase
-                const field = phase === 3 ? 'dictationAnswers' : phase === 4 ? 'dictationMeaningAnswers' : phase === 5 ? 'dictationSecondWordAnswers' : 'dictationSecondMeaningAnswers'
-                return <div className={`dictation-paper-cell dictation-answer ${completed ? 'is-obscured' : ''} ${active ? 'is-active' : ''}`} role="cell">{completed ? <strong>{answer || '—'}</strong> : active ? <input value={answer} onChange={(event) => void persist({ ...session, methodProgress: { ...progress, dictationBatchWordIds: visibleBatch, [field]: { ...(answersByPhase[String(phase)] ?? {}), [id]: event.target.value } } })} autoComplete="off" spellCheck={false} aria-label={`${word.word}${placeholder}`} placeholder={placeholder} /> : <span className="dictation-pending">待进行</span>}</div>
+                const answer = active ? (dictationDrafts[id] ?? answersByPhase[String(phase)]?.[id] ?? '') : (answersByPhase[String(phase)]?.[id] ?? '')
+                const englishAnswer = phase === 3 || phase === 5
+                return <div className={`dictation-paper-cell dictation-answer ${completed ? 'is-obscured' : ''} ${active ? 'is-active' : ''}`} role="cell">{completed ? <strong>{answer || '—'}</strong> : active ? <input value={answer} onChange={(event) => setDictationDrafts((current) => ({ ...current, [id]: event.target.value }))} type="text" inputMode="text" lang={englishAnswer ? 'en' : 'zh-CN'} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-label={`${word.word}${placeholder}`} placeholder={placeholder} /> : <span className="dictation-pending">待进行</span>}</div>
               }
               const maskWordPrompt = phaseIsWord && showDictationCover
               const maskMeaningPrompt = !phaseIsWord && showDictationCover

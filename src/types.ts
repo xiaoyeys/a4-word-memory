@@ -88,6 +88,7 @@ export interface MethodProgress {
   dictationMeaningAnswers?: Record<string, string>
   dictationSecondWordAnswers?: Record<string, string>
   dictationSecondMeaningAnswers?: Record<string, string>
+  dictationCompletedAnswers?: Record<string, { firstWord: string; firstMeaning: string; secondWord: string; secondMeaning: string }>
   dictationPhase?: 3 | 4 | 5 | 6
   dictationPhaseCorrectIds?: Record<string, string[]>
   dictationCorrectWordIds?: string[]
