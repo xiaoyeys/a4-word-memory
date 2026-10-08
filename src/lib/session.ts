@@ -132,11 +132,15 @@ export async function finishSession(session: StudySession) {
 }
 
 /** Persist words genuinely encountered so far without advancing their FSRS schedule. */
-export async function savePartialSession(session: StudySession) {
+export async function savePartialSession(session: StudySession, onlyIfActive = false) {
   const now = new Date().toISOString()
   const touchedIds = new Set(session.events.map((event) => event.wordId))
   const checkpoint = { ...session, updatedAt: now }
   await db.transaction('rw', db.sessions, db.cards, async () => {
+    if (onlyIfActive) {
+      const stored = await db.sessions.get(session.id)
+      if (!stored || stored.status !== 'active' || session.status !== 'active' || stored.stage !== session.stage || stored.methodIndex !== session.methodIndex) return
+    }
     await db.sessions.put(checkpoint)
     for (const wordId of touchedIds) {
       const stored = await db.cards.get(wordId)

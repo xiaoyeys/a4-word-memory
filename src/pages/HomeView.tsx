@@ -1,9 +1,27 @@
-import { AlertTriangle, ArrowRight, BookOpen, CalendarDays, CheckCircle2, Clock3, Eye, Flame, Play, RefreshCw, Search, Sparkles, Target, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, BookOpen, CalendarDays, CheckCircle2, Clock3, Eye, Flame, Play, RefreshCw, Search, Sparkles, Target } from 'lucide-react'
 import { useState } from 'react'
+import { PageBack, PageLink } from '../components/PageNavigation'
+import { goToPage, usePageRoute } from '../lib/navigation'
 import { formatPartOfSpeech } from '../components/MeaningDisplay'
 import { dailyPlan, isLearnedCard } from '../lib/study'
-import { completedDaySet, dayKey, monthCalendar, nextSevenDaysDue, studyStreak } from '../lib/checkin'
+import { dayKey, studyStreak } from '../lib/checkin'
 import type { AppSettings, StoredCard, StudySession, WordEntry, WordLibrary } from '../types'
+
+function unfinishedProgress(session: StudySession) {
+  const total = session.wordIds.length
+  if (session.mode === 'due') return `已复习 ${Object.keys(session.reviewFirstRatings ?? {}).length}/${total} 词`
+  const progress = session.methodProgress
+  if (session.stage === 'dictation') {
+    const phase = progress?.dictationPhase ?? 3
+    const label = phase === 3 ? '第一次默写单词' : phase === 4 ? '第一次默写释义' : phase === 5 ? '第二次默写单词' : '第二次默写释义'
+    return `折叠默写 · ${label} · 已完成 ${progress?.dictationAttemptedWordIds?.length ?? 0}/${total} 词`
+  }
+  if (session.stage === 'match') {
+    const matched = Math.min(total, (progress?.matchGroupIndex ?? 0) * (session.methodGroupSize ?? 8) + (progress?.matchedWordIds?.length ?? 0))
+    return `词义连连看 · 已配对 ${matched}/${total} 词`
+  }
+  return `随机散点 · 已放置 ${session.placed.length}/${total} 词`
+}
 
 export function HomeView(props: {
   library?: WordLibrary
@@ -20,12 +38,16 @@ export function HomeView(props: {
   onContinue: () => void
   onAbandon: () => void
 }) {
-  const [previewOpen, setPreviewOpen] = useState(false)
+  const section = usePageRoute().split('/')[1] ?? ''
+  const [weakSearch, setWeakSearch] = useState('')
+  const [weakFilter, setWeakFilter] = useState('all')
+  const [previewLimit, setPreviewLimit] = useState(50)
+  const [weakLimit, setWeakLimit] = useState(40)
   const [previewSearch, setPreviewSearch] = useState('')
   const { library } = props
   const libraryWords = props.words.filter((word) => word.libraryId === library?.id)
   const normalizedPreviewSearch = previewSearch.trim().toLowerCase()
-  const previewWords = libraryWords.filter((word) => !normalizedPreviewSearch || `${word.word} ${word.meaning} ${word.phonetic ?? ''}`.toLowerCase().includes(normalizedPreviewSearch)).slice(0, 200)
+  const previewWords = libraryWords.filter((word) => !normalizedPreviewSearch || `${word.word} ${word.meaning} ${word.phonetic ?? ''}`.toLowerCase().includes(normalizedPreviewSearch)).slice(0, previewLimit)
   const wordIds = new Set(libraryWords.map((word) => word.id))
   const libraryCards = props.cards.filter((card) => wordIds.has(card.wordId))
   const cardMap = new Map(libraryCards.map((card) => [card.wordId, card]))
@@ -52,28 +74,48 @@ export function HomeView(props: {
   const streak = studyStreak(completed, library?.id)
   const weekStart = new Date(); weekStart.setHours(0, 0, 0, 0); weekStart.setDate(weekStart.getDate() - 6)
   const weekDays = new Set(completed.filter((session) => session.libraryId === library?.id && new Date(session.completedAt!).getTime() >= weekStart.getTime()).map((session) => dayKey(session.completedAt!))).size
-  const activeDays = completedDaySet(completed, library?.id)
-  const calendar = monthCalendar(new Date().getFullYear(), new Date().getMonth(), activeDays)
-  const nextReviews = nextSevenDaysDue(libraryCards)
   const estimatedMinutes = Math.max(1, Math.ceil(plan.totalCount * .6))
+
+
+  const filteredWeak = weakWords.filter((word) => {
+    const card = cardMap.get(word.id)!
+    const matchesFilter = weakFilter === 'all' || (weakFilter === 'forget' ? (card.forgetCount ?? 0) > 0 : weakFilter === 'spelling' ? (card.spellingErrorCount ?? 0) > 0 : weakFilter === 'fuzzy' ? (card.fuzzyCount ?? 0) > 0 : weakFilter === 'important' ? card.important : card.confusing)
+    return matchesFilter && (!weakSearch || `${word.word} ${word.meaning}`.toLowerCase().includes(weakSearch.toLowerCase()))
+  })
+  if (section === 'preview') return <div className="page-content word-preview-page">
+    <PageBack fallback="home" label="返回学习" /><div className="page-heading"><p className="eyebrow">当前词书预览</p><h1>{library?.name ?? '未选择词书'}</h1><p>{library ? `共 ${library.wordCount} 词，浏览不改变学习计划。` : '选择词书后即可查看单词。'}</p></div>
+    <label className="search-box list-search"><Search size={17} /><input value={previewSearch} onChange={(event) => { setPreviewSearch(event.target.value); setPreviewLimit(50) }} placeholder="搜索英文、音标或中文释义" /></label>
+    <div className="panel preview-word-table"><div className="preview-word-row preview-word-head"><span>单词</span><span>词性与释义</span></div>{previewWords.map((word) => <div className="preview-word-row" key={word.id}><span><strong>{word.word}</strong><small>{word.phonetic || '暂无音标'}</small></span><span><small>{formatPartOfSpeech(word.partOfSpeech) || '未标注词性'}</small><em>{word.meaning}</em></span></div>)}{!previewWords.length && <div className="empty-state compact">没有匹配的单词</div>}</div>
+    {previewWords.length === previewLimit && <button className="secondary list-more" onClick={() => setPreviewLimit((count) => count + 50)}>查看更多单词</button>}
+  </div>
+  if (section === 'weak') return <div className="page-content weak-detail-page">
+    <PageBack fallback="home" label="返回学习" /><div className="page-heading"><p className="eyebrow">重点加强 · {library?.name ?? '未选择词书'}</p><h1>薄弱词专区</h1><p>{weakWords.length} 个词需要加强，可按错误类型查看。</p></div>
+    <div className="detail-action-bar"><button className="primary" disabled={!library || !weakWords.length || Boolean(props.activeSession)} onClick={props.onStartWeak}>开始薄弱词复习<ArrowRight size={17} /></button></div>
+    <div className="segmented-filter">{[['all', '全部'], ['forget', '忘记'], ['spelling', '拼写错误'], ['fuzzy', '模糊'], ['important', '重点'], ['confusing', '易混淆']].map(([id, label]) => <button key={id} className={weakFilter === id ? 'active' : ''} onClick={() => { setWeakFilter(id); setWeakLimit(40) }}>{label}</button>)}</div>
+    <label className="search-box list-search"><Search size={17} /><input value={weakSearch} onChange={(event) => { setWeakSearch(event.target.value); setWeakLimit(40) }} placeholder="搜索单词或释义" /></label>
+    <div className="panel weak-detail-list">{filteredWeak.slice(0, weakLimit).map((word) => { const card = cardMap.get(word.id)!; const reasons = [(card.forgetCount ?? 0) > 0 ? `忘记 ${card.forgetCount} 次` : '', (card.spellingErrorCount ?? 0) > 0 ? `拼写错误 ${card.spellingErrorCount} 次` : '', (card.fuzzyCount ?? 0) > 0 ? `模糊 ${card.fuzzyCount} 次` : '', card.important ? '重点词' : '', card.confusing ? '易混淆' : ''].filter(Boolean); return <article key={word.id}><strong>{word.word}</strong><p>{word.meaning}</p><small>{reasons.join(' · ') || '记忆难度较高'}</small></article> })}{!filteredWeak.length && <div className="empty-state compact">当前没有匹配的薄弱词</div>}</div>
+    {filteredWeak.length > weakLimit && <button className="secondary list-more" onClick={() => setWeakLimit((count) => count + 40)}>查看更多</button>}
+  </div>
 
   return <div className="page-content daily-home">
     <header className="daily-greeting">
-      <div><p className="eyebrow">今日学习</p><h1>{library ? '按计划，写完今天这张纸。' : '先选一本词书，建立你的学习计划。'}</h1></div>
+      <div><p className="eyebrow">今日学习</p><h1>{library ? '开始今天的学习。' : '选一本词书，开始学习。'}</h1></div>
       <div className="streak-chip"><Flame size={19} /><span>连续学习</span><strong>{streak}</strong><span>天</span></div>
     </header>
 
-    {props.activeSession && <section className="resume-banner"><div><span className="resume-icon"><Play /></span><div><strong>上次学习还没有结束</strong><p>{props.activeSession.libraryName} · {props.activeSession.mode === 'due' ? `已复习 ${Object.keys(props.activeSession.reviewFirstRatings ?? {}).length}/${props.activeSession.wordIds.length} 词` : `已放置 ${props.activeSession.placed.length}/${props.activeSession.wordIds.length} 词`}</p></div></div><div><button className="text-button" onClick={props.onAbandon}>放弃</button><button className="primary" onClick={props.onContinue}>继续学习<ArrowRight size={17} /></button></div></section>}
+    {props.activeSession && <section className="resume-banner"><div><span className="resume-icon"><Play /></span><div><strong>上次学习还没有结束</strong><p>{props.activeSession.libraryName} · {unfinishedProgress(props.activeSession)}</p></div></div><div><button className="text-button" onClick={props.onAbandon}>放弃</button><button className="primary" onClick={props.onContinue}>继续学习<ArrowRight size={17} /></button></div></section>}
 
     <div className="daily-dashboard">
       <section className="current-book-card panel">
-        <div className="book-cover"><span>{library?.name.split(' ')[0] ?? 'A4'}</span><small>{library ? library.name.replace(library.name.split(' ')[0], '').trim() || '自定义词书' : '学习计划'}</small></div>
+        {library
+          ? <div className="book-cover"><span>{library.name.split(' ')[0]}</span><small>{library.name.replace(library.name.split(' ')[0], '').trim() || '自定义词书'}</small></div>
+          : <button type="button" className="book-cover book-cover-button" onClick={props.onEditPlan} aria-label="选择计划词书"><span>A4</span><small>点击选择词书</small></button>}
         <div className="book-summary">
           <span className="section-kicker">当前词书</span>
           <h2>{library?.name ?? '未选择词书'}</h2>
           <p>已学 <strong>{learned}</strong> / {library?.wordCount ?? 0} 词</p>
           <div className="progress-track"><i style={{ width: `${progress}%` }} /></div>
-          <div className="book-card-actions"><button className="book-change" onClick={props.onEditPlan}><Target size={16} />调整计划</button>{library && <button className="book-change" onClick={() => setPreviewOpen(true)}><Eye size={16} />预览单词</button>}</div>
+          <div className="book-card-actions"><button className="book-change" onClick={props.onEditPlan}><Target size={16} />调整计划</button>{library && <button className="book-change" onClick={() => goToPage('home/preview')}><Eye size={16} />预览单词</button>}</div>
         </div>
       </section>
 
@@ -92,14 +134,14 @@ export function HomeView(props: {
         <div><CalendarDays /><span><small>本周完成</small><strong>{weekDays} 天</strong></span></div>
       </section>
     </div>
-    <div className="home-insights-grid">
-      <section className="panel checkin-calendar"><div className="section-heading compact-heading"><div><span className="section-kicker"><CalendarDays size={16} />学习打卡</span><h2>{new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })}</h2></div><span className="calendar-caption">已学习 {activeDays.size} 天</span></div><div className="calendar-weekdays">{['一', '二', '三', '四', '五', '六', '日'].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{calendar.map((item, index) => item ? <span key={item.key} className={item.completed ? 'calendar-day completed' : dayKey(new Date()) === item.key ? 'calendar-day today' : 'calendar-day'}>{new Date(item.date).getDate()}</span> : <i key={`empty-${index}`} />)}</div></section>
-      <section className="panel upcoming-reviews"><div className="section-heading compact-heading"><div><span className="section-kicker"><RefreshCw size={16} />智能复习</span><h2>未来 7 天复习量</h2></div></div><div className="review-bars">{nextReviews.map((item) => <div key={item.key}><span>{item.date.toLocaleDateString('zh-CN', { weekday: 'short' })}</span><div><i style={{ height: `${Math.max(8, Math.min(100, item.count * 12))}%` }} /></div><strong>{item.count}</strong></div>)}</div><p className="field-help">到期词从“复习到期词”入口开始；错过的复习会保留到下一次学习。</p></section>
+
+    <div className="home-shortcuts">
+      <PageLink to="stats/calendar" title="学习打卡" description={`连续 ${streak} 天 · 本周学习 ${weekDays} 天`} icon={<CalendarDays />} />
+      <PageLink to="stats/reviews" title="复习安排" description={`今日到期 ${plan.dueCount} 词 · 查看未来 7 天`} icon={<RefreshCw />} />
     </div>
     <section className="panel home-weak-zone">
-      <div className="section-heading"><div><span className="section-kicker"><AlertTriangle size={16} />重点加强</span><h2>薄弱词复习</h2><p>{library ? weakWords.length ? `当前词书有 ${weakWords.length} 个词需要加强` : '当前词书暂时没有薄弱词' : '选择计划词书并开始学习后，这里会整理薄弱词'}</p></div><button className="primary" disabled={!library || !weakWords.length || Boolean(props.activeSession)} onClick={props.onStartWeak}>开始薄弱词复习<ArrowRight size={17} /></button></div>
-      {weakWords.length > 0 && <div className="home-weak-preview">{weakWords.slice(0, 6).map((word) => { const card = cardMap.get(word.id)!; const reasons = [(card.forgetCount ?? 0) > 0 ? `忘记 ${card.forgetCount}` : '', (card.spellingErrorCount ?? 0) > 0 ? `拼写 ${card.spellingErrorCount}` : '', (card.fuzzyCount ?? 0) > 0 ? `模糊 ${card.fuzzyCount}` : '', card.important ? '重点' : '', card.confusing ? '易混淆' : ''].filter(Boolean); return <div key={word.id}><strong>{word.word}</strong><span>{word.meaning}</span><small>{reasons.join(' · ') || '记忆难度较高'}</small></div> })}</div>}
+      <div className="section-heading"><div><span className="section-kicker"><AlertTriangle size={16} />重点加强</span><h2>薄弱词复习</h2><p>{library ? weakWords.length ? `当前词书有 ${weakWords.length} 个词需要加强` : '当前词书暂时没有薄弱词' : '开始学习后，这里会整理薄弱词'}</p></div><button className="secondary" onClick={() => goToPage('home/weak')}>查看详情<ArrowRight size={17} /></button></div>
+      {weakWords.length > 0 && <button className="primary" disabled={Boolean(props.activeSession)} onClick={props.onStartWeak}>开始薄弱词复习<ArrowRight size={17} /></button>}
     </section>
-    {previewOpen && library && <div className="modal-backdrop library-preview-backdrop"><section className="modal library-preview-modal" role="dialog" aria-modal="true" aria-labelledby="library-preview-title"><button className="icon-button modal-close" onClick={() => setPreviewOpen(false)} aria-label="关闭单词预览"><X /></button><p className="eyebrow">当前计划词书</p><h2 id="library-preview-title">{library.name}</h2><p className="library-preview-summary">共 {library.wordCount} 个单词，仅供预览，不会改变学习计划。</p><label className="search-box"><Search size={17} /><input value={previewSearch} onChange={(event) => setPreviewSearch(event.target.value)} placeholder="搜索英文、音标或中文释义" autoFocus /></label><div className="preview-word-table"><div className="preview-word-row preview-word-head"><span>单词</span><span>词性与释义</span></div>{previewWords.map((word) => <div className="preview-word-row" key={word.id}><span><strong>{word.word}</strong><small>{word.phonetic || '暂无音标'}</small></span><span><small>{formatPartOfSpeech(word.partOfSpeech) || '未标注词性'}</small><em>{word.meaning}</em></span></div>)}{!previewWords.length && <div className="empty-state compact">没有匹配的单词</div>}</div>{libraryWords.length > 200 && !normalizedPreviewSearch && <p className="field-help">当前先显示前 200 个单词，可通过搜索查找其他词条。</p>}</section></div>}
   </div>
 }

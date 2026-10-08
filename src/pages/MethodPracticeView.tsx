@@ -7,6 +7,7 @@ import { normalizeWord } from '../lib/study'
 import { playOnlinePronunciation } from '../lib/pronunciation'
 import type { AppSettings, MethodProgress, RecallEvent, StudyMethod, StudySession, WordEntry } from '../types'
 import { CompletedDictationPaper } from '../components/CompletedDictationPaper'
+import { useStudyLeaveSave } from '../lib/useStudyLeaveSave'
 import { MeaningDisplay, splitMeaning } from '../components/MeaningDisplay'
 
 interface Props {
@@ -43,6 +44,7 @@ function meaningAnswerMatches(word: WordEntry, answer: string) {
 }
 
 export function MethodPracticeView({ initial, words, settings, onFinish, onExit }: Props) {
+  const [showAllColumns, setShowAllColumns] = useState(false)
   const [session, setSession] = useState(initial)
   const [showDictationCover, setShowDictationCover] = useState(true)
   const [showCompletedPaper, setShowCompletedPaper] = useState(false)
@@ -82,6 +84,7 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
     '6': progress.dictationSecondMeaningAnswers ?? {},
   }
   const allTried = session.wordIds.every((id) => attempted.includes(id))
+  useStudyLeaveSave(() => ({ ...session, activeSeconds: activeSecondsRef.current + Math.floor((Date.now() - activeSinceRef.current) / 1000), methodProgress: currentMethod === 'dictation' ? { ...progress, [currentAnswerField]: { ...phaseAnswers, ...dictationDrafts } } : progress }), currentMethod === 'dictation' ? dictationDrafts : undefined)
 
   function play(word: WordEntry) {
     playOnlinePronunciation(word.word, settings.accent, () => {
@@ -338,7 +341,8 @@ export function MethodPracticeView({ initial, words, settings, onFinish, onExit 
     {currentMethod === 'dictation' && <main className="method-paper dictation-method">
       <div className="method-heading"><p className="eyebrow">折叠默写 · 第 {(progress.dictationIndex ?? 0) + 1} 轮</p><h1>{phaseAnswerLabel}</h1><p>当前列完成后自动进入下一列；已完成的填写会保留在纸上，但会高模糊遮挡，避免直接看到答案。</p><button className="text-button" onClick={() => setShowDictationCover((current) => !current)} aria-pressed={showDictationCover}>{showDictationCover ? <><EyeOff size={15} />隐藏遮挡</> : <><Eye size={15} />显示遮挡</>}</button></div>
         {!visibleBatch.length ? <><section className="dictation-finish panel"><CheckCircle2 /><h2>{correctDictation.length}/{session.wordIds.length} 个词已完成四列默写</h2><p>现在可以解除遮挡查看完整 A4 纸；完成学习后，这张纸会自动进入学习档案。</p><div className="method-action-row"><button className="secondary" onClick={() => setShowCompletedPaper((current) => !current)}><Eye size={16} />{showCompletedPaper ? '收起完整纸面' : '查看完整 A4 纸'}</button><button className="secondary" onClick={() => { const missed = session.wordIds.filter((id) => !correctDictation.includes(id)); void persist({ ...session, methodProgress: { ...progress, dictationRoundComplete: false, dictationBatchWordIds: missed.slice(0, groupSize), dictationQueue: missed, dictationAnswers: {}, dictationMeaningAnswers: {}, dictationSecondWordAnswers: {}, dictationSecondMeaningAnswers: {}, dictationPhase: 3, dictationPhaseCorrectIds: {}, dictationGradeCorrectIds: undefined, dictationOverrides: {} } }) }} disabled={!session.wordIds.some((id) => !correctDictation.includes(id))}><RotateCcw size={16} />再练错词</button><button className="primary" disabled={!allTried} onClick={() => void finishDictation(true)}>完成并存入学习档案</button></div>{!allTried && <small>继续练习，确保每个目标词至少完成四列默写。</small>}</section>{showCompletedPaper && <CompletedDictationPaper wordIds={session.wordIds} wordsById={wordsById} progress={progress} />}</> : <>
-        <div className="dictation-paper-workspace">
+        <button className="tool-button mobile-dictation-view" onClick={() => setShowAllColumns((current) => !current)} aria-pressed={showAllColumns}>{showAllColumns ? '返回当前列填写' : '查看完整六列纸面'}</button>
+        <div className={`dictation-paper-workspace ${showAllColumns ? 'show-all-columns' : 'focus-column'} phase-${dictationPhase}${showDictationCover ? ' cover-enabled' : ''}`}>
           <div className="dictation-paper" role="table" aria-label="六列折叠默写纸">
             <div className="dictation-column-head" role="row">
               <span role="columnheader">1 · 单词提示</span>

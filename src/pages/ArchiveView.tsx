@@ -1,3 +1,5 @@
+import { PageBack } from '../components/PageNavigation'
+import { goBackPage, goToPage, usePageRoute } from '../lib/navigation'
 import { Archive, BookOpen, CalendarDays, Download, FileText, Folder, FolderInput, FolderPlus, Heart, Pencil, Printer, Search, Trash2, Volume2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { formatPartOfSpeech, MeaningDisplay } from '../components/MeaningDisplay'
@@ -37,11 +39,18 @@ function fallbackSpeak(text: string, accent: AppSettings['accent']) {
 }
 
 export function ArchiveView({ folders, papers, libraries, words, cards, settings, onChanged }: ArchiveViewProps) {
-  const [archiveSection, setArchiveSection] = useState<'papers' | 'words'>('papers')
+  const route = usePageRoute()
+  const archiveSection = route.startsWith('archive/words') ? 'words' : 'papers'
+  const folderPage = route === 'archive/folders'
+  const openPaper = papers.find((paper) => !paper.removed && (route === `archive/paper/${encodeURIComponent(paper.id)}` || route.startsWith(`archive/paper/${encodeURIComponent(paper.id)}/`)))
+  const paperRoute = openPaper ? `archive/paper/${encodeURIComponent(openPaper.id)}` : 'archive'
+  const selectedWord = openPaper?.words.find((word) => route === `${paperRoute}/word/${encodeURIComponent(word.id)}`)
+  const favoriteDetail = words.find((word) => route === `archive/words/${encodeURIComponent(word.id)}`)
+  const [listLimit, setListLimit] = useState(40)
+  function setSelectedWord(word?: MemoryWordSnapshot) { goToPage(word ? `${paperRoute}/word/${encodeURIComponent(word.id)}` : paperRoute, !word) }
+
   const [folderFilter, setFolderFilter] = useState<FolderFilter>('all')
-  const [openPaper, setOpenPaper] = useState<MemoryPaper>()
   const [currentPage, setCurrentPage] = useState(0)
-  const [selectedWord, setSelectedWord] = useState<MemoryWordSnapshot>()
   const [selectedPaperMethod, setSelectedPaperMethod] = useState<'overview' | 'scatter' | 'match' | 'dictation'>('overview')
   const [paperSearch, setPaperSearch] = useState('')
   const [favoriteWordSearch, setFavoriteWordSearch] = useState('')
@@ -82,9 +91,8 @@ export function ArchiveView({ folders, papers, libraries, words, cards, settings
   }
 
   function viewPaper(paper: MemoryPaper) {
-    setOpenPaper(paper)
+    goToPage(`archive/paper/${encodeURIComponent(paper.id)}`)
     setCurrentPage(0)
-    setSelectedWord(undefined)
     setSelectedPaperMethod('overview')
   }
 
@@ -174,27 +182,34 @@ export function ArchiveView({ folders, papers, libraries, words, cards, settings
 
   const selectedFolderName = folderFilter === 'all' ? '全部记忆纸' : folderFilter === 'favorites' ? '我的收藏' : folders.find((folder) => folder.id === folderFilter)?.name ?? '记忆纸'
 
-  return <div className="page-content archive-page">
+  return <div className={openPaper ? 'page-content archive-page paper-detail-page' : 'page-content archive-page'}>
+    {folderPage && <PageBack fallback="archive" label="返回学习档案" />}
+    {favoriteDetail && <PageBack fallback="archive/words" label="返回收藏单词" />}
+    {!openPaper && <>
     <div className="page-heading split-heading archive-heading">
-      <div><p className="eyebrow">你的本地学习记录</p><h1>学习档案</h1><p>集中查看收藏单词和 A4 学习纸，随时重新唤起记忆。</p></div>
-      {archiveSection === 'papers' && <button className="primary" onClick={createFolder}><FolderPlus size={18} />新建文件夹</button>}
+      <div><p className="eyebrow">你的本地学习记录</p><h1>{folderPage ? '管理文件夹' : favoriteDetail ? favoriteDetail.word : '学习档案'}</h1><p>集中查看收藏单词和 A4 学习纸，随时重新唤起记忆。</p></div>
+      {folderPage && <button className="primary" onClick={createFolder}><FolderPlus size={18} />新建文件夹</button>}
     </div>
-    <div className="archive-layout">
-      <aside className="archive-folders" aria-label="记忆纸文件夹">
-        <button className={archiveSection === 'words' ? 'archive-folder active' : 'archive-folder'} onClick={() => setArchiveSection('words')}><Heart /><span><strong>收藏单词</strong><small>{favoriteWordIds.size} 个</small></span></button>
+    {!folderPage && !favoriteDetail && <div className="archive-tabs" role="group" aria-label="档案分类"><button className={archiveSection === 'papers' ? 'active' : ''} onClick={() => goToPage('archive')}>记忆纸 <small>{visiblePapers.length}</small></button><button className={archiveSection === 'words' ? 'active' : ''} onClick={() => goToPage('archive/words')}>收藏单词 <small>{favoriteWordIds.size}</small></button></div>}
+    {favoriteDetail && <section className="panel favorite-detail"><button className="archive-word-title" onClick={() => speak(favoriteDetail.word)}>{favoriteDetail.word}<Volume2 /></button><p className="phonetic">{favoriteDetail.phonetic || '暂无音标'}</p><MeaningDisplay meaning={favoriteDetail.meaning} partOfSpeech={favoriteDetail.partOfSpeech} /><small>{libraryNames.get(favoriteDetail.libraryId)}</small><button className="secondary list-more" onClick={async () => { await removeFavoriteWord(favoriteDetail.id); goToPage('archive/words', true) }}><Heart size={17} />取消收藏</button></section>}
+    {!favoriteDetail && <div className={folderPage ? 'folder-management-layout' : archiveSection === 'words' ? 'archive-words-layout' : 'archive-layout'}>
+      {archiveSection === 'papers' && <div className="mobile-folder-picker"><label>文件夹<select value={folderFilter} onChange={(event) => setFolderFilter(event.target.value)}><option value="all">全部记忆纸</option><option value="favorites">收藏记忆纸</option>{sortedFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label><button className="tool-button" onClick={() => goToPage('archive/folders')}>管理</button></div>}
+      {(archiveSection === 'papers' || folderPage) && <>
+      <aside className={folderPage ? 'archive-folders folder-management' : 'archive-folders desktop-folders'} aria-label="记忆纸文件夹">
         <p className="archive-folder-label">学习纸</p>
-        <button className={archiveSection === 'papers' && folderFilter === 'all' ? 'archive-folder active' : 'archive-folder'} onClick={() => { setArchiveSection('papers'); setFolderFilter('all') }}><Archive /><span><strong>全部记忆纸</strong><small>{visiblePapers.length} 张</small></span></button>
-        <button className={archiveSection === 'papers' && folderFilter === 'favorites' ? 'archive-folder active' : 'archive-folder'} onClick={() => { setArchiveSection('papers'); setFolderFilter('favorites') }}><Heart /><span><strong>收藏记忆纸</strong><small>{visiblePapers.filter((paper) => paper.favorite).length} 张</small></span></button>
+        <button className={archiveSection === 'papers' && folderFilter === 'all' ? 'archive-folder active' : 'archive-folder'} onClick={() => { setFolderFilter('all'); if (folderPage) goToPage('archive') }}><Archive /><span><strong>全部记忆纸</strong><small>{visiblePapers.length} 张</small></span></button>
+        <button className={archiveSection === 'papers' && folderFilter === 'favorites' ? 'archive-folder active' : 'archive-folder'} onClick={() => { setFolderFilter('favorites'); if (folderPage) goToPage('archive') }}><Heart /><span><strong>收藏记忆纸</strong><small>{visiblePapers.filter((paper) => paper.favorite).length} 张</small></span></button>
         <p className="archive-folder-label">记忆纸文件夹</p>
         {sortedFolders.map((folder) => <div className={archiveSection === 'papers' && folderFilter === folder.id ? 'archive-folder-row active' : 'archive-folder-row'} key={folder.id}>
-          <button className="archive-folder" onClick={() => { setArchiveSection('papers'); setFolderFilter(folder.id) }}>{folder.kind === 'library' ? <BookOpen /> : <Folder />}<span><strong>{folder.name}</strong><small>{visiblePapers.filter((paper) => paper.folderId === folder.id).length} 张</small></span></button>
+          <button className="archive-folder" onClick={() => { setFolderFilter(folder.id); if (folderPage) goToPage('archive') }}>{folder.kind === 'library' ? <BookOpen /> : <Folder />}<span><strong>{folder.name}</strong><small>{visiblePapers.filter((paper) => paper.folderId === folder.id).length} 张</small></span></button>
           <button className="folder-action" onClick={() => renameFolder(folder)} title="重命名文件夹" aria-label={`重命名${folder.name}`}><Pencil /></button>
           {folder.kind === 'custom' && folder.id !== defaultFolderId && <button className="folder-action danger" onClick={() => deleteFolder(folder)} title="删除文件夹" aria-label={`删除${folder.name}`}><Trash2 /></button>}
         </div>)}
-      </aside>
-      {archiveSection === 'papers' ? <section className="archive-content">
+        {!folderPage && <button className="tool-button" onClick={() => goToPage('archive/folders')}>管理文件夹</button>}
+      </aside></>}
+      {!folderPage && (archiveSection === 'papers' ? <section className="archive-content">
         <div className="archive-section-heading"><div><h2>{selectedFolderName}</h2><p>{shownPapers.length ? `共 ${shownPapers.length} 张，收藏的纸会排在前面` : '这里还没有记忆纸'}</p></div><label className="search-box archive-search"><Search size={16} /><input value={paperSearch} onChange={(event) => setPaperSearch(event.target.value)} placeholder="搜索词书、日期或名称" /></label></div>
-        {shownPapers.length ? <div className="memory-paper-grid">{shownPapers.map((paper) => {
+        {shownPapers.length ? <div className="memory-paper-grid">{shownPapers.slice(0, listLimit).map((paper) => {
           const firstPageWords = paper.placed.filter((item) => item.page === 0)
           const paperWords = new Map(paper.words.map((word) => [word.id, word]))
           const pages = Math.max(1, ...paper.placed.map((item) => item.page + 1))
@@ -205,28 +220,29 @@ export function ArchiveView({ folders, papers, libraries, words, cards, settings
             </button>
             <div className="memory-paper-meta"><div><strong>{paper.title}</strong><span><CalendarDays />{formatDay(paper.completedAt)} · {paper.words.length} 词</span></div><button className={paper.favorite ? 'paper-favorite active' : 'paper-favorite'} onClick={() => toggleFavorite(paper)} aria-label={paper.favorite ? '取消收藏' : '收藏'} title={paper.favorite ? '取消收藏' : '收藏'}><Heart /></button></div>
             <div className="memory-paper-rates"><span>{paper.mode === 'due' ? '快速复习 · 错词纸' : `${(paper.methods ?? ['scatter']).length > 1 ? '混合流程' : '单方法'} · ${(paper.methods ?? ['scatter']).map((method) => method === 'scatter' ? '散点' : method === 'match' ? '连连看' : '默写').join(' → ')}`}</span><span>待复习 {paper.unmasteredWordIds?.length ?? 0}</span></div>
-            <div className="memory-paper-actions">
+            <details className="paper-options"><summary aria-label="记忆纸操作">更多操作 ···</summary><div className="memory-paper-actions">
               <button onClick={() => renamePaper(paper)} title="重命名"><Pencil /></button>
               <label title="移动到文件夹"><FolderInput /><select value={paper.folderId} onChange={(event) => movePaper(paper, event.target.value)} aria-label={`移动${paper.title}`}>
                 {sortedFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
               </select></label>
               <button className="danger" onClick={() => removePaper(paper)} title="从档案移除"><Trash2 /></button>
-            </div>
+            </div></details>
           </article>
         })}</div> : <div className="archive-empty"><FileText /><h3>还没有记忆纸</h3><p>{folderFilter === 'all' ? '完成一轮 A4 单词学习后，记忆纸会自动保存在这里。' : '可以把已有记忆纸移动或收藏到这里。'}</p></div>}
       </section> : <section className="archive-content favorite-words-archive">
         <div className="archive-section-heading"><div><h2>收藏单词</h2><p>{favoriteWordIds.size ? `共收藏 ${favoriteWordIds.size} 个单词，按字母顺序排列` : '学习时点击爱心收藏的单词会出现在这里'}</p></div><label className="search-box archive-search"><Search size={16} /><input value={favoriteWordSearch} onChange={(event) => setFavoriteWordSearch(event.target.value)} placeholder="搜索单词、释义或词书" /></label></div>
-        {favoriteWords.length ? <div className="favorite-word-list">{favoriteWords.map((word) => <article className="favorite-word-row" key={word.id}><button className="favorite-word-title" onClick={() => speak(word.word)} title="朗读单词"><strong>{word.word}</strong><span>{word.phonetic || '暂无音标'}<Volume2 size={14} /></span></button><div className="favorite-word-meaning"><small>{formatPartOfSpeech(word.partOfSpeech) || '未标注词性'} · {libraryNames.get(word.libraryId) ?? '未知词书'}</small><p>{word.meaning}</p></div><button className="favorite-word-remove" onClick={() => void removeFavoriteWord(word.id)} aria-label={`取消收藏${word.word}`} title="取消收藏"><Heart /></button></article>)}</div> : <div className="archive-empty"><Heart /><h3>{favoriteWordSearch ? '没有匹配的收藏单词' : '还没有收藏单词'}</h3><p>{favoriteWordSearch ? '换一个关键词试试。' : '背单词时点击单词卡片旁的爱心，就能在这里集中查看。'}</p></div>}
-      </section>}
-    </div>
-    {openPaper && <div className="modal-backdrop archive-viewer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpenPaper(undefined) }}><section className="archive-viewer" role="dialog" aria-modal="true" aria-label={openPaper.title}>
-       <header className="archive-viewer-header"><div><small>{openPaper.libraryName}</small><h2>{openPaper.title}</h2></div><div className="archive-viewer-actions"><button className="tool-button" onClick={() => exportPaper(openPaper)}><Download size={16} />导出图片</button><button className="tool-button" onClick={() => window.print()}><Printer size={16} />打印</button><button className="icon-button" onClick={() => setOpenPaper(undefined)} aria-label="关闭记忆纸"><X /></button></div></header>
+        {favoriteWords.length ? <div className="favorite-word-list">{favoriteWords.slice(0, listLimit).map((word) => <article className="favorite-word-row" key={word.id}><button className="favorite-word-title" onClick={() => goToPage(`archive/words/${encodeURIComponent(word.id)}`)} title="查看单词详情"><strong>{word.word}</strong><span>{word.phonetic || '暂无音标'}<Volume2 size={14} /></span></button><div className="favorite-word-meaning"><small>{formatPartOfSpeech(word.partOfSpeech) || '未标注词性'} · {libraryNames.get(word.libraryId) ?? '未知词书'}</small><p>{word.meaning}</p></div><button className="favorite-word-remove" onClick={() => void removeFavoriteWord(word.id)} aria-label={`取消收藏${word.word}`} title="取消收藏"><Heart /></button></article>)}</div> : <div className="archive-empty"><Heart /><h3>{favoriteWordSearch ? '没有匹配的收藏单词' : '还没有收藏单词'}</h3><p>{favoriteWordSearch ? '换一个关键词试试。' : '背单词时点击单词卡片旁的爱心，就能在这里集中查看。'}</p></div>}
+      </section>)}
+      {!folderPage && (archiveSection === 'papers' ? shownPapers.length : favoriteWords.length) > listLimit && <button className="secondary list-more" onClick={() => setListLimit((count) => count + 40)}>查看更多</button>}
+    </div>}</>}
+    {openPaper && <div className="archive-detail"><PageBack fallback={selectedWord ? paperRoute : 'archive'} label={selectedWord ? '返回记忆纸' : '返回学习档案'} /><section className="archive-viewer" aria-label={openPaper.title}>
+       <header className="archive-viewer-header"><div><small>{openPaper.libraryName}</small><h2>{openPaper.title}</h2></div><div className="archive-viewer-actions"><button className="tool-button" onClick={() => exportPaper(openPaper)}><Download size={16} />导出图片</button><button className="tool-button" onClick={() => window.print()}><Printer size={16} />打印</button></div></header>
       <div className={selectedWord ? 'archive-viewer-body has-word-card' : 'archive-viewer-body'}>
         <div className="archive-method-view">
           {(openPaper.methods?.length ?? 0) > 1 && <nav className="archive-method-tabs" aria-label="学习方法档案">{(['overview', ...openPaper.methods!] as const).map((method) => <button key={method} className={selectedPaperMethod === method ? 'active' : ''} onClick={() => setSelectedPaperMethod(method === 'overview' ? 'overview' : method)}>{method === 'overview' ? '流程总览' : method === 'scatter' ? '随机散点' : method === 'match' ? '词义连连看' : '折叠默写'}</button>)}</nav>}
           {showDictationPaper ? <section className="archive-completed-dictation"><CompletedDictationPaper wordIds={openPaper.words.map((word) => word.id)} wordsById={wordsById} progress={openPaper.methodProgress} /></section> : openPaper.placed.length && ((openPaper.methods?.length ?? 0) < 2 || selectedPaperMethod === 'scatter') ? <PaperCanvas placed={openPaper.placed} words={new Map(openPaper.words.map((word) => [word.id, { word: word.word }]))} currentPage={currentPage} onPageChange={(page) => { setCurrentPage(page); setSelectedWord(undefined) }} onWordClick={inspectWord} onPreview={() => undefined} showSequence highlightedId={selectedWord?.id} onSpeak={speak} mobileExpanded onMobileToggle={() => undefined} showMobileToggle={false} /> : <section className="archive-method-summary"><p className="eyebrow">{selectedPaperMethod === 'overview' ? (openPaper.methods ?? []).map((method) => method === 'scatter' ? '随机散点' : method === 'match' ? '词义连连看' : '折叠默写').join(' → ') : selectedPaperMethod === 'scatter' ? '随机散点' : selectedPaperMethod === 'match' ? '词义连连看' : '折叠默写'}</p><h2>{selectedPaperMethod === 'overview' ? openPaper.words.length : selectedPaperMethod === 'scatter' ? openPaper.placed.length : openPaper.words.length} 个目标词</h2><p>掌握率 {Math.round(openPaper.finalMasteryRate * 100)}% · 待复习 {openPaper.unmasteredWordIds?.length ?? 0} 个</p><div className="archive-method-word-list">{openPaper.words.map((word) => { const unresolved = openPaper.unmasteredWordIds?.includes(word.id); const events = openPaper.methodEvents?.filter((event) => event.wordId === word.id && (selectedPaperMethod === 'overview' || selectedPaperMethod === 'scatter' || event.method === selectedPaperMethod)) ?? []; return <article key={word.id}><strong>{word.word}</strong><span>{word.partOfSpeech ?? ''} {word.meaning}</span><small className={unresolved ? 'unresolved' : ''}>{unresolved ? '待复习' : events.map((event) => event.method === 'match' ? '配对' : event.method === 'dictation' ? '默写' : '回忆').join(' · ') || (selectedPaperMethod === 'scatter' && openPaper.placed.some((item) => item.wordId === word.id) ? '已落纸' : '练习完成')}</small></article> })}</div></section>}
         </div>
-        {selectedWord && <aside className="archive-word-card"><button className="icon-button" onClick={() => setSelectedWord(undefined)} aria-label="关闭单词卡片"><X /></button><button className="archive-word-title" onClick={() => speak(selectedWord.word)}><span>{selectedWord.word}</span><Volume2 /></button><p className="phonetic">{selectedWord.phonetic || '暂无音标'}</p><MeaningDisplay meaning={selectedWord.meaning} partOfSpeech={selectedWord.partOfSpeech} /></aside>}
+        {selectedWord && <aside className="archive-word-card"><button className="icon-button" onClick={() => goBackPage(paperRoute)} aria-label="关闭单词卡片"><X /></button><button className="archive-word-title" onClick={() => speak(selectedWord.word)}><span>{selectedWord.word}</span><Volume2 /></button><p className="phonetic">{selectedWord.phonetic || '暂无音标'}</p><MeaningDisplay meaning={selectedWord.meaning} partOfSpeech={selectedWord.partOfSpeech} /></aside>}
       </div>
     </section></div>}
   </div>

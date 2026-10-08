@@ -5,6 +5,7 @@ import { db } from '../db'
 import { playOnlinePronunciation, stopPronunciationAudio } from '../lib/pronunciation'
 import { nextReviewQueue, normalizeQuickReviewSession } from '../lib/review'
 import { finishSession, savePartialSession } from '../lib/session'
+import { useStudyLeaveSave } from '../lib/useStudyLeaveSave'
 import { playFeedbackSound } from '../lib/sound'
 import { findRandomPlacement, normalizeWord } from '../lib/study'
 import type { AppSettings, PlacedWord, RecallRating, StoredCard, StudySession, WordEntry } from '../types'
@@ -54,6 +55,7 @@ export function QuickReviewView({ initial, words, settings, onFinish, onRetry, o
   const currentWord = wordsById.get(queue[reviewIndex])
   const currentCard = currentWord ? cards.get(currentWord.id) : undefined
   const spellingReview = Boolean(currentCard?.pendingDictation)
+  useStudyLeaveSave(() => ({ ...session, activeSeconds: activeSecondsRef.current + Math.floor((Date.now() - activeSinceRef.current) / 1000) }))
 
   function checkpoint(value: StudySession) {
     const now = Date.now()

@@ -1,0 +1,41 @@
+A4 单词记忆工具 — 依赖清单
+================================
+
+运行环境
+- Node.js：18 或更高版本（建议安装当前 LTS 版本）
+- npm：随 Node.js 一同安装
+
+项目依赖由 npm 根据 package.json 自动安装，不需要逐个手动下载。
+
+生产运行依赖
+- dexie ^4.0.11
+- lucide-react ^0.468.0
+- read-excel-file ^6.0.1
+- recharts ^2.15.0
+- ts-fsrs ^5.2.0
+
+开发与测试依赖
+- @testing-library/jest-dom ^6.6.3
+- @testing-library/react ^16.1.0
+- @types/react ^19.0.3
+- @types/react-dom ^19.0.2
+- @vitejs/plugin-react ^4.3.4
+- jsdom ^25.0.1
+- typescript ~5.7.2
+- vite ^6.0.5
+- vite-plugin-pwa ^0.21.1
+- vitest ^2.1.8
+
+启动项目
+1. 安装 Node.js（建议 LTS 版本）：https://nodejs.org/
+2. 解压项目 ZIP，并在项目文件夹中打开终端。
+3. 执行：npm install
+4. 执行：npm run dev
+5. 按终端显示的地址，在浏览器中打开项目。
+
+其他命令
+- npm run build：构建发布版本
+- npm run test：运行测试
+- npm run preview：本地预览构建结果
+
+无需分享 node_modules 文件夹；接收者运行 npm install 即可安装所需依赖。

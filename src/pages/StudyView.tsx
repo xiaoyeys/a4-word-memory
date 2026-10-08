@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { db } from '../db'
 import { estimateWordBox, findRandomPlacement, normalizeWord, summaryFor } from '../lib/study'
 import { finishSession, savePartialSession } from '../lib/session'
+import { useStudyLeaveSave } from '../lib/useStudyLeaveSave'
 import { playFeedbackSound } from '../lib/sound'
 import { playOnlinePronunciation, stopPronunciationAudio } from '../lib/pronunciation'
 import type { AppSettings, PlacedWord, RecallRating, StudySession, WordEntry } from '../types'
@@ -131,6 +132,7 @@ export function StudyView({ initial, words, settings, onSettings, onFinish, onEx
   const recallPlacement = session.placed[session.recallIndex]
   const recallWord = recallPlacement ? wordsById.get(recallPlacement.wordId) : undefined
   const relearnWord = session.selectedRecallWordId ? wordsById.get(session.selectedRecallWordId) : undefined
+  useStudyLeaveSave(() => ({ ...session, activeSeconds: activeSecondsRef.current + Math.floor((Date.now() - activeSinceRef.current) / 1000) }))
 
   function checkpointSession(value: StudySession) {
     const now = Date.now()

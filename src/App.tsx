@@ -1,5 +1,7 @@
 import { Bell, CircleHelp, Download, HardDrive, Headphones, Info, Palette, RefreshCw, ShieldCheck, Upload, Volume2, VolumeX } from 'lucide-react'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { goToPage, goToParentPage, usePageRoute } from './lib/navigation'
+import { PageBack, PageLink } from './components/PageNavigation'
 import { Onboarding } from './components/Onboarding'
 import { Shell, type ViewName } from './components/Shell'
 import { db, ensureBuiltinLibraryLoaded, getSettings, initializeDatabase, saveSettings, type LibraryLoadProgress } from './db'
@@ -24,7 +26,10 @@ const ArchiveView = lazy(() => import('./pages/ArchiveView').then((module) => ({
 
 function App() {
   const [ready, setReady] = useState(false)
-  const [view, setView] = useState<ViewName>('home')
+  const route = usePageRoute()
+  const view = route.split('/')[0] as ViewName
+  const setView = goToPage
+  const [planLibraryId, setPlanLibraryId] = useState<string>()
   const [libraries, setLibraries] = useState<WordLibrary[]>([])
   const [words, setWords] = useState<WordEntry[]>([])
   const [sessions, setSessions] = useState<StudySession[]>([])
@@ -33,13 +38,12 @@ function App() {
   const [memoryPapers, setMemoryPapers] = useState<MemoryPaper[]>([])
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [activeSession, setActiveSession] = useState<StudySession>()
-  const [setupInitialMode, setSetupInitialMode] = useState<StudyMode>('daily')
-  const [setupPurpose, setSetupPurpose] = useState<'plan' | 'start'>('plan')
   const [initError, setInitError] = useState('')
   const [updateAvailable, setUpdateAvailable] = useState(false)
   const [backupReminder, setBackupReminder] = useState(false)
   const [libraryLoad, setLibraryLoad] = useState<(LibraryLoadProgress & { error?: string })>()
   const selectingLibraryRef = useRef(false)
+  const previewLibraryRef = useRef(false)
 
   async function refresh() {
     const [nextLibraries, nextWords, nextSessions, nextCards, storedSettings] = await Promise.all([
@@ -76,23 +80,31 @@ function App() {
     return subscribeToAppUpdate(setUpdateAvailable)
   }, [])
 
+  useEffect(() => {
+    const reload = () => { void refresh() }
+    window.addEventListener('a4:checkpoint-saved', reload)
+    return () => window.removeEventListener('a4:checkpoint-saved', reload)
+  }, [])
+
   async function changeSettings(next: AppSettings) {
     setSettings(next)
     await saveSettings(next)
   }
 
-  async function selectPlanLibrary(libraryId: string) {
+  async function selectPlanLibrary(libraryId: string, previewOnly = false) {
     if (selectingLibraryRef.current) return
     const library = libraries.find((item) => item.id === libraryId) ?? await db.libraries.get(libraryId)
     if (!library) return
     selectingLibraryRef.current = true
+    previewLibraryRef.current = previewOnly
     setLibraryLoad({ phase: 'checking', libraryId, libraryName: library.name, percent: 4 })
     try {
       await ensureBuiltinLibraryLoaded(libraryId, setLibraryLoad)
-      await saveSettings({ ...settings, currentLibraryId: libraryId })
       await refresh()
-      setView('setup')
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      if (!previewOnly) {
+        setPlanLibraryId(libraryId)
+        goToParentPage('setup')
+      }
       setLibraryLoad(undefined)
     } catch (error) {
       setLibraryLoad((current) => ({
@@ -109,12 +121,8 @@ function App() {
 
   function navigate(next: ViewName) {
     if (next === 'study' && !activeSession) return
-    if (next === 'setup') {
-      setSetupPurpose('plan')
-      setSetupInitialMode('daily')
-    }
+    if (next === 'setup') setPlanLibraryId(settings.currentLibraryId)
     setView(next)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function startSession(options: { library: WordLibrary; words: WordEntry[]; mode: StudyMode; placementMode: PlacementMode; count: number; allowRecent: boolean; methods?: StudyMethod[]; methodGroupSize?: number; dictationGroupSize?: number; randomSpellCheck?: boolean; scatterRepetitions?: number; scatterRecallBatchSize?: number }) {
@@ -126,6 +134,17 @@ function App() {
   }
 
   const currentLibrary = libraries.find((library) => library.id === settings.currentLibraryId)
+  const draftLibrary = libraries.find((library) => library.id === planLibraryId)
+  const isExtraSetup = route.startsWith('setup/extra') || route.startsWith('setup/weak')
+  useEffect(() => {
+    if (view === 'setup') setPlanLibraryId(settings.currentLibraryId)
+  }, [view, ready])
+
+  function editPlan() {
+    setPlanLibraryId(settings.currentLibraryId)
+    setView('setup')
+    if (!currentLibrary) setView('setup/books')
+  }
 
   async function startDueReview() {
     if (!currentLibrary || activeSession?.status === 'active') return
@@ -207,18 +226,19 @@ function App() {
 
   return <>
     <Shell view={view} onNavigate={navigate} studyActive={activeSession?.status === 'active'} updateAvailable={updateAvailable} onUpdate={applyAppUpdate}>
-      {view === 'home' && <HomeView library={currentLibrary} words={words} cards={cards} sessions={sessions} settings={settings} activeSession={activeSession} onEditPlan={() => { setSetupPurpose('plan'); setSetupInitialMode('daily'); setView('setup') }} onExtraStudy={() => { setSetupPurpose('start'); setSetupInitialMode('random'); setView('setup') }} onStartWeak={() => { setSetupPurpose('start'); setSetupInitialMode('weak'); setView('setup') }} onStudyNew={() => void startNewWords()} onReviewDue={() => void startDueReview()} onContinue={() => { unlockPronunciationAudio(); setView('study') }} onAbandon={async () => { if (!activeSession || !window.confirm('放弃后不会推进复习日期，确定继续吗？')) return; await db.sessions.update(activeSession.id, { status: 'abandoned', updatedAt: new Date().toISOString() }); await refresh() }} />}
-      {view === 'setup' && <SetupView purpose={setupPurpose} initialMode={setupInitialMode} library={currentLibrary} words={words} cards={cards} sessions={sessions} settings={settings} onSettings={changeSettings} onChoosePlanLibrary={() => setView('libraries')} onSaved={() => setView('home')} onStart={startSession} />}
+      {view === 'home' && <HomeView library={currentLibrary} words={words} cards={cards} sessions={sessions} settings={settings} activeSession={activeSession} onEditPlan={() => { editPlan() }} onExtraStudy={() => { setView('setup/extra') }} onStartWeak={() => { setView('setup/weak') }} onStudyNew={() => void startNewWords()} onReviewDue={() => void startDueReview()} onContinue={() => { unlockPronunciationAudio(); setView('study') }} onAbandon={async () => { if (!activeSession || !window.confirm('放弃后不会推进复习日期，确定继续吗？')) return; await db.sessions.update(activeSession.id, { status: 'abandoned', updatedAt: new Date().toISOString() }); await refresh() }} />}
+      {view === 'study' && !activeSession && <div className="completion-page"><h1>当前没有进行中的学习</h1><button className="primary" onClick={() => setView('home')}>返回学习</button></div>}
+      {view === 'setup' && <div hidden={route.startsWith('setup/books')}><SetupView key={isExtraSetup ? 'extra' : 'plan'} purpose={isExtraSetup ? 'start' : 'plan'} initialMode={route.startsWith('setup/weak') ? 'weak' : isExtraSetup ? 'random' : 'daily'} library={isExtraSetup ? currentLibrary : draftLibrary} words={words} cards={cards} sessions={sessions} settings={settings} onSettings={(next) => changeSettings({ ...next, currentLibraryId: planLibraryId })} onChoosePlanLibrary={() => setView('setup/books')} onSaved={() => setView('home')} onStart={startSession} /></div>}
       {view === 'study' && activeSession && activeSession.mode === 'due' && <QuickReviewView key={activeSession.id} initial={activeSession} words={words.filter((word) => word.libraryId === activeSession.libraryId)} settings={settings} onFinish={async (session) => { await refresh(); setActiveSession(session) }} onRetry={async (session, wordIds) => { const retry = await createQuickReviewRetry(session, wordIds); await refresh(); setActiveSession(retry) }} onExit={async () => { await refresh(); setView('home') }} />}
       {view === 'study' && activeSession && activeSession.mode !== 'due' && (activeSession.stage === 'match' || activeSession.stage === 'dictation') && <MethodPracticeView key={`${activeSession.id}-${activeSession.stage}`} initial={activeSession} words={words.filter((word) => word.libraryId === activeSession.libraryId)} settings={settings} onFinish={async (session) => { await refresh(); setActiveSession(session); if (session.status === 'completed' && !settings.backupReminderShown) setBackupReminder(true) }} onExit={async () => { await refresh(); setView('home') }} />}
       {view === 'study' && activeSession && activeSession.mode !== 'due' && activeSession.stage !== 'match' && activeSession.stage !== 'dictation' && <StudyView initial={activeSession} words={words.filter((word) => word.libraryId === activeSession.libraryId)} settings={settings} onSettings={changeSettings} onFinish={async (session) => { await refresh(); setActiveSession(session); if (session.status === 'completed' && !settings.backupReminderShown) setBackupReminder(true) }} onExit={async () => { await refresh(); setView('home') }} />}
-      {view === 'libraries' && <Suspense fallback={<div className="loading-section">正在打开词书…</div>}><LibraryView libraries={libraries} words={words} currentLibraryId={currentLibrary?.id} loadingLibraryId={libraryLoad?.libraryId} onSelect={selectPlanLibrary} onChanged={refresh} /></Suspense>}
+      {(view === 'libraries' || (view === 'setup' && route.startsWith('setup/books'))) && <Suspense fallback={<div className="loading-section">正在打开词书…</div>}><LibraryView libraries={libraries} words={words} currentLibraryId={planLibraryId} loadingLibraryId={libraryLoad?.libraryId} onSelect={selectPlanLibrary} onPreview={(id) => selectPlanLibrary(id, true)} onChanged={refresh} /></Suspense>}
       {view === 'archive' && <Suspense fallback={<div className="loading-section">正在整理学习档案…</div>}><ArchiveView folders={memoryFolders} papers={memoryPapers} libraries={libraries} words={words} cards={cards} settings={settings} onChanged={refresh} /></Suspense>}
-      {view === 'stats' && <Suspense fallback={<div className="loading-section">正在整理统计…</div>}><StatsView sessions={sessions} cards={cards} words={words} library={currentLibrary} onEditPlan={() => { setSetupPurpose('plan'); setSetupInitialMode('daily'); setView('setup') }} /></Suspense>}
+      {view === 'stats' && <Suspense fallback={<div className="loading-section">正在整理统计…</div>}><StatsView sessions={sessions} cards={cards} words={words} library={currentLibrary} onEditPlan={() => { editPlan() }} /></Suspense>}
       {view === 'settings' && <SettingsView settings={settings} onSettings={changeSettings} onRestored={refresh} />}
       {!settings.onboardingDone && <Onboarding onDone={() => changeSettings({ ...settings, onboardingDone: true })} />}
     </Shell>
-    {libraryLoad && <LibraryLoadingOverlay progress={libraryLoad} onRetry={() => void selectPlanLibrary(libraryLoad.libraryId)} onClose={() => setLibraryLoad(undefined)} />}
+    {libraryLoad && <LibraryLoadingOverlay progress={libraryLoad} onRetry={() => void selectPlanLibrary(libraryLoad.libraryId, previewLibraryRef.current)} onClose={() => setLibraryLoad(undefined)} />}
     {backupReminder && <div className="modal-backdrop"><section className="modal backup-reminder" role="dialog" aria-modal="true"><p className="eyebrow">保护学习记录</p><h2>第一轮已经完成</h2><p>学习记录只保存在当前浏览器。清理浏览器数据或更换手机会导致记录丢失，建议现在导出一份备份。</p><div className="modal-actions"><button className="text-button" onClick={async () => { await changeSettings({ ...settings, backupReminderShown: true }); setBackupReminder(false) }}>稍后</button><button className="primary" onClick={async () => { const lastBackupAt = await exportBackup(); await changeSettings({ ...settings, backupReminderShown: true, lastBackupAt }); setBackupReminder(false) }}><Download size={17} />立即备份</button></div></section></div>}
   </>
 }
@@ -252,6 +272,7 @@ function LibraryLoadingOverlay({ progress, onRetry, onClose }: { progress: Libra
 
 function SettingsView({ settings, onSettings, onRestored }: { settings: AppSettings; onSettings: (settings: AppSettings) => void; onRestored: () => Promise<void> }) {
   const restoreRef = useRef<HTMLInputElement>(null)
+  const section = usePageRoute().split('/')[1] ?? ''
 
   async function backupNow() {
     const lastBackupAt = await exportBackup()
@@ -307,18 +328,28 @@ function SettingsView({ settings, onSettings, onRestored }: { settings: AppSetti
   const notificationStatus = typeof Notification === 'undefined' ? '当前浏览器不支持系统通知' : Notification.permission === 'granted' ? '通知权限已允许' : Notification.permission === 'denied' ? '通知权限已被浏览器拒绝' : '开启时会请求通知权限'
 
   return <div className="page-content settings-page">
-    <div className="page-heading settings-heading"><p className="eyebrow">偏好与数据</p><h1>设置</h1><p>管理所有学习方法共用的体验、提醒和本地数据。</p></div>
+    {section && <PageBack fallback="settings" label="返回设置" />}
+    <div className="page-heading settings-heading"><p className="eyebrow">偏好与数据</p><h1>{({ sound: '声音与朗读', appearance: '卡片与纸面', reminders: '学习提醒', data: '本地数据', help: '使用帮助' } as Record<string, string>)[section] ?? '设置'}</h1><p>{section ? '修改会自动保存。' : '按分类调整你的学习体验。'}</p></div>
+    {!section && <div className="page-menu">
+      <PageLink to="settings/sound" icon={<Headphones />} title="声音与朗读" description={`自动朗读${settings.autoSpeak ? '开启' : '关闭'} · ${settings.accent === 'en-US' ? '美音' : '英音'}`} />
+      <PageLink to="settings/appearance" icon={<Palette />} title="卡片与纸面" description={`纸面字号 ${Math.round(settings.fontScale * 100)}% · 卡片信息与操作提示`} />
+      <PageLink to="settings/reminders" icon={<Bell />} title="学习提醒" description={settings.reminderEnabled ? `每日 ${settings.reminderTime} 提醒` : '未开启提醒'} />
+      <PageLink to="settings/data" icon={<HardDrive />} title="本地数据" description={settings.lastBackupAt ? `上次备份：${new Date(settings.lastBackupAt).toLocaleDateString('zh-CN')}` : '导出备份与恢复学习记录'} />
+      <PageLink to="settings/help" icon={<CircleHelp />} title="使用帮助" description="重新查看分步学习引导" />
+    </div>}
 
+    {section === 'sound' && <>
     <section className="settings-section">
       <div className="settings-section-heading"><span><Headphones /></span><div><h2>声音与朗读</h2><p>控制单词发音和操作反馈。</p></div></div>
       <div className="panel settings-list">
-        <div className="setting-row"><span><strong>自动朗读</strong><small>进入单词卡片或词序回忆时自动播放一次</small></span><button className={settings.autoSpeak ? 'sound-toggle active' : 'sound-toggle'} onClick={() => onSettings({ ...settings, autoSpeak: !settings.autoSpeak })} aria-pressed={settings.autoSpeak}>{settings.autoSpeak ? <Volume2 /> : <VolumeX />}{settings.autoSpeak ? '已开启' : '已关闭'}</button></div>
+        <div className="setting-row"><span><strong>自动朗读</strong><small>进入单词卡片时自动播放一次</small></span><button className={settings.autoSpeak ? 'sound-toggle active' : 'sound-toggle'} onClick={() => onSettings({ ...settings, autoSpeak: !settings.autoSpeak })} aria-pressed={settings.autoSpeak}>{settings.autoSpeak ? <Volume2 /> : <VolumeX />}{settings.autoSpeak ? '已开启' : '已关闭'}</button></div>
         <div className="setting-row"><span><strong>朗读口音</strong><small>在线音频和浏览器朗读均按此口音播放</small></span><div className="setting-control-line"><select value={settings.accent} onChange={(event) => onSettings({ ...settings, accent: event.target.value as AppSettings['accent'] })}><option value="en-US">美式英语</option><option value="en-GB">英式英语</option></select><button className="secondary compact-button" onClick={testPronunciation}><Volume2 size={16} />试听</button></div></div>
         <div className="setting-row"><span><strong>浏览器朗读速度</strong><small>仅在在线音频不可用、回退到系统语音时生效</small></span><div className="range-control"><input aria-label="浏览器朗读速度" type="range" min="0.6" max="1.3" step="0.05" value={settings.speechRate} onChange={(event) => onSettings({ ...settings, speechRate: Number(event.target.value) })} /><output>{settings.speechRate.toFixed(2).replace(/0$/, '')}x</output></div></div>
         <div className="setting-row"><span><strong>反馈音效</strong><small>完成、答对、答错和放置时播放短音效</small></span><div className="setting-control-line"><button className={settings.soundEffects ? 'sound-toggle active' : 'sound-toggle'} onClick={() => onSettings({ ...settings, soundEffects: !settings.soundEffects })} aria-pressed={settings.soundEffects}>{settings.soundEffects ? <Volume2 /> : <VolumeX />}{settings.soundEffects ? '已开启' : '已关闭'}</button><button className="secondary compact-button" onClick={() => playFeedbackSound('correct', true)}><Volume2 size={16} />试听</button></div></div>
       </div>
     </section>
-
+    </>}
+    {section === 'appearance' && <>
     <section className="settings-section">
       <div className="settings-section-heading"><span><Palette /></span><div><h2>卡片与纸面</h2><p>调整学习时看到的信息和 A4 纸外观。</p></div></div>
       <div className="panel settings-list">
@@ -328,7 +359,8 @@ function SettingsView({ settings, onSettings, onRestored }: { settings: AppSetti
         <div className="setting-row"><span><strong>操作提示</strong><small>显示学习过程中的可选引导；必要错误仍会保留</small></span><button className={settings.showStudyHints ? 'sound-toggle active' : 'sound-toggle'} onClick={() => onSettings({ ...settings, showStudyHints: !settings.showStudyHints })} aria-pressed={settings.showStudyHints}>{settings.showStudyHints ? '显示提示' : '精简提示'}</button></div>
       </div>
     </section>
-
+    </>}
+    {section === 'reminders' && <>
     <section className="settings-section">
       <div className="settings-section-heading"><span><Bell /></span><div><h2>学习提醒</h2><p>仅在浏览器支持且页面可运行时生效。</p></div></div>
       <div className="panel settings-list">
@@ -336,16 +368,19 @@ function SettingsView({ settings, onSettings, onRestored }: { settings: AppSetti
         <div className="setting-row"><span><strong>提醒时间</strong><small>应用打开时，在设定时间检查当天未完成计划</small></span><input type="time" value={settings.reminderTime} disabled={!settings.reminderEnabled} onChange={(event) => onSettings({ ...settings, reminderTime: event.target.value })} /></div>
       </div>
     </section>
-
+    </>}
+    {section === 'data' && <>
     <section className="settings-section">
       <div className="settings-section-heading"><span><HardDrive /></span><div><h2>本地数据</h2><p>导出备份，避免清理浏览器数据或更换设备后丢失记录。</p></div></div>
       <div className="panel settings-data-panel"><div className="privacy-note"><ShieldCheck /><span><strong>数据仅保存在此浏览器</strong><small>词书、拼写和学习历史不会上传到服务器。</small></span></div><div className="data-actions"><button className="secondary" onClick={backupNow}><Download size={18} />导出完整备份</button><button className="secondary" onClick={() => restoreRef.current?.click()}><Upload size={18} />从备份恢复</button><input ref={restoreRef} hidden type="file" accept="application/json,.json" onChange={(event) => { void restore(event.target.files?.[0]); event.target.value = '' }} /></div><p className="field-help">{settings.lastBackupAt ? `上次备份：${new Date(settings.lastBackupAt).toLocaleString('zh-CN')}` : '尚未导出过备份。恢复前会自动下载当前数据恢复点。'}</p></div>
     </section>
-
+    </>}
+    {section === 'help' && <>
     <section className="settings-section settings-help-section">
       <div className="settings-section-heading"><span><CircleHelp /></span><div><h2>使用帮助</h2><p>需要时重新查看完整操作流程。</p></div></div>
       <div className="panel settings-list"><div className="setting-row"><span><strong>新手引导</strong><small>重新查看从记忆、放置到回忆的分步示例</small></span><button className="secondary" onClick={() => onSettings({ ...settings, onboardingDone: false })}><Info size={17} />重新查看</button></div></div>
     </section>
+    </>}
   </div>
 }
 
